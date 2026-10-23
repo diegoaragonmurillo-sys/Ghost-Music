@@ -17,16 +17,12 @@ import 'lyrics_service.dart';
 /// en Hive para reproducción instantánea con latencia cero sin conexión.
 class DownloadService extends ChangeNotifier {
   DownloadService({
-    Dio? dio,
-    Box<Map<dynamic, dynamic>>? box,
-    String? baseDirPath,
-    AudioRouterService? audioRouter,
-    LyricsService? lyricsService,
-  })  : _dio = dio,
-        _box = box,
-        _baseDirPath = baseDirPath,
-        _audioRouter = audioRouter,
-        _lyricsService = lyricsService;
+    this._dio,
+    this._box,
+    this._baseDirPath,
+    this._audioRouter,
+    this._lyricsService,
+  });
 
   static final DownloadService instance = DownloadService();
 

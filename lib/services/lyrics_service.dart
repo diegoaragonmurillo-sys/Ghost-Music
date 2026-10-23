@@ -12,9 +12,8 @@ import 'download_service.dart';
 class LyricsService {
   LyricsService({
     http.Client? httpClient,
-    DownloadService? downloadService,
-  })  : _http = httpClient ?? http.Client(),
-        _downloadService = downloadService;
+    this._downloadService,
+  })  : _http = httpClient ?? http.Client();
 
   final http.Client _http;
   final DownloadService? _downloadService;

@@ -18,9 +18,8 @@ class AudioRouterService {
   AudioRouterService({
     required this.searchService,
     SettingsManager? settingsManager,
-    DownloadService? downloadService,
-  })  : _settings = settingsManager ?? SettingsManager.instance,
-        _downloadService = downloadService;
+    this._downloadService,
+  })  : _settings = settingsManager ?? SettingsManager.instance;
 
   final SearchService searchService;
   final SettingsManager _settings;

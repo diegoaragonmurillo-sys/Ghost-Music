@@ -13,7 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _FailingSearchService extends SearchService {
   @override
-  Future<String?> getStreamUrl(Track track) {
+  Future<String> resolveAudioUrl(String videoId) {
     throw StateError('Nivel 0 falló: se invocó SearchService en lugar de disco');
   }
 
