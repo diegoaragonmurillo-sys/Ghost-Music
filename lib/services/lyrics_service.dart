@@ -5,8 +5,7 @@ import 'package:http/http.dart' as http;
 import '../features/player/models/lyrics.dart';
 import '../features/player/models/track.dart';
 
-/// Letras sincronizadas desde LRCLIB (https://lrclib.net), API abierta y
-/// gratuita sin API key.
+/// Servicio de letras sincronizadas mediante LRCLIB (`https://lrclib.net/api/search`).
 class LyricsService {
   LyricsService({http.Client? httpClient})
       : _http = httpClient ?? http.Client();
@@ -20,65 +19,90 @@ class LyricsService {
         'GhostMusic/1.0.0 (https://github.com/diegoaragonmurillo-sys/Ghost-Music)',
   };
 
+  /// Obtiene y parsea las letras sincronizadas (LRC) para [trackName] y [artistName].
+  Future<List<LyricLine>> fetchSyncedLyrics({
+    required String trackName,
+    required String artistName,
+  }) async {
+    final cleanTrack = _cleanForLookup(trackName);
+    final cleanArtist = _cleanArtist(artistName);
+
+    final lyrics = await _search({
+          'track_name': cleanTrack,
+          'artist_name': cleanArtist,
+        }) ??
+        await _search({'q': '$cleanTrack $cleanArtist'});
+
+    if (lyrics == null) return const [];
+    return lyrics.lines;
+  }
+
+  /// Obtiene el objeto [Lyrics] para un [Track] con caché en memoria.
   Future<Lyrics?> fetch(Track track) async {
     if (_cache.containsKey(track.id)) return _cache[track.id];
 
     final title = _cleanForLookup(track.title);
+    final artist = _cleanArtist(track.artist);
     Lyrics? lyrics;
     try {
-      // 1. Coincidencia exacta (con duración para elegir la versión correcta).
-      lyrics = await _get(title, track.artist, track.duration);
-      // 2. Búsqueda flexible por título + artista.
-      lyrics ??= await _search({'track_name': title, 'artist_name': track.artist});
-      // 3. Búsqueda libre.
-      lyrics ??= await _search({'q': '$title ${track.artist}'});
+      // 1. Petición GET a https://lrclib.net/api/search pasando track_name y artist_name.
+      lyrics = await _search({
+        'track_name': title,
+        'artist_name': artist,
+      });
+      // 2. Fallback por consulta general si los metadatos de YouTube varían.
+      lyrics ??= await _search({'q': '$title $artist'});
     } catch (_) {
       lyrics = null;
     }
     return _cache[track.id] = lyrics;
   }
 
-  Future<Lyrics?> _get(String title, String artist, Duration? duration) async {
-    final res = await _http
-        .get(
-          Uri.https(_host, '/api/get', {
-            'track_name': title,
-            'artist_name': artist,
-            if (duration != null) 'duration': '${duration.inSeconds}',
-          }),
-          headers: _headers,
-        )
-        .timeout(const Duration(seconds: 8));
-    if (res.statusCode != 200) return null;
-    final json = jsonDecode(res.body) as Map<String, dynamic>;
-    return Lyrics.parse(
-      synced: json['syncedLyrics'] as String?,
-      plain: json['plainLyrics'] as String?,
-    );
-  }
-
   Future<Lyrics?> _search(Map<String, String> params) async {
+    final uri = Uri.https(_host, '/api/search', params);
     final res = await _http
-        .get(Uri.https(_host, '/api/search', params), headers: _headers)
+        .get(uri, headers: _headers)
         .timeout(const Duration(seconds: 8));
     if (res.statusCode != 200) return null;
-    final list = (jsonDecode(res.body) as List).cast<Map<String, dynamic>>();
-    if (list.isEmpty) return null;
-    // Preferir resultados con letra sincronizada.
-    final best = list.firstWhere(
-      (e) => (e['syncedLyrics'] as String?)?.isNotEmpty ?? false,
-      orElse: () => list.first,
-    );
+
+    final decoded = jsonDecode(res.body);
+    if (decoded is! List || decoded.isEmpty) return null;
+
+    final list = decoded.cast<Map<String, dynamic>>();
+
+    // Prioriza resultados que contengan el campo syncedLyrics en formato LRC.
+    for (final item in list) {
+      final synced = item['syncedLyrics'] as String?;
+      if (synced != null && synced.trim().isNotEmpty) {
+        final parsed = Lyrics.parse(synced: synced);
+        if (parsed != null && parsed.lines.isNotEmpty) {
+          return parsed;
+        }
+      }
+    }
+
+    // Fallback a letra plana si ninguna entrada tiene tiempos LRC.
+    final first = list.first;
     return Lyrics.parse(
-      synced: best['syncedLyrics'] as String?,
-      plain: best['plainLyrics'] as String?,
+      synced: first['syncedLyrics'] as String?,
+      plain: first['plainLyrics'] as String?,
     );
   }
 
-  /// Quita "ft./feat." y paréntesis residuales que confunden la búsqueda.
+  /// Convierte un texto LRC (`[01:15.22] Texto`) directamente en `List<LyricLine>`.
+  List<LyricLine> parseLrc(String syncedLyrics) => Lyrics.parseLrc(syncedLyrics);
+
   static String _cleanForLookup(String title) => title
       .replaceAll(RegExp(r'\s*[\(\[].*?[\)\]]'), '')
-      .replaceAll(RegExp(r'\s+(ft\.?|feat\.?|featuring)\s+.*$', caseSensitive: false), '')
+      .replaceAll(
+        RegExp(r'\s+(ft\.?|feat\.?|featuring)\s+.*$', caseSensitive: false),
+        '',
+      )
+      .trim();
+
+  static String _cleanArtist(String artist) => artist
+      .replaceAll(RegExp(r'\s*-\s*Topic$', caseSensitive: false), '')
+      .replaceAll(RegExp(r'\s*VEVO$', caseSensitive: false), '')
       .trim();
 
   void dispose() => _http.close();
