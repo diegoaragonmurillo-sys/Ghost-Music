@@ -5,11 +5,13 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/duration_formatter.dart';
+import '../../core/widgets/track_artwork_image.dart';
 import '../../services/audio_player_service.dart';
 import '../../services/library_service.dart';
 import '../../services/lyrics_service.dart';
 import '../../services/palette_service.dart';
 import '../../services/search_service.dart';
+import '../downloads/widgets/download_button.dart';
 import '../library/views/library_screen.dart';
 import '../library/widgets/add_to_playlist_sheet.dart';
 import '../player/models/track.dart';
@@ -461,7 +463,6 @@ class _TrackTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final thumbUrl = track.fallbackArtworkUrl ?? track.artworkUrl;
 
     return InkWell(
       borderRadius: BorderRadius.circular(10),
@@ -470,22 +471,11 @@ class _TrackTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: Row(
           children: [
-            ClipRRect(
+            TrackArtworkImage(
+              track: track,
+              width: 56,
+              height: 56,
               borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                thumbUrl,
-                width: 56,
-                height: 56,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => const ColoredBox(
-                  color: Color(0xFF1C1C22),
-                  child: SizedBox(
-                    width: 56,
-                    height: 56,
-                    child: Icon(Icons.music_note_rounded),
-                  ),
-                ),
-              ),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -517,6 +507,7 @@ class _TrackTile extends StatelessWidget {
                 ],
               ),
             ),
+            DownloadButton(track: track, size: 20),
             IconButton(
               tooltip:
                   isFavorite ? 'Quitar de favoritos' : 'Añadir a favoritos',
@@ -562,7 +553,6 @@ class _MiniPlayerBar extends StatelessWidget {
         final track = snapshot.data ?? audioService.currentTrack;
         if (track == null) return const SizedBox.shrink();
 
-        final thumbUrl = track.fallbackArtworkUrl ?? track.artworkUrl;
         return Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
           child: ClipRRect(
@@ -580,19 +570,11 @@ class _MiniPlayerBar extends StatelessWidget {
                     ),
                     child: Row(
                       children: [
-                        ClipRRect(
+                        TrackArtworkImage(
+                          track: track,
+                          width: 44,
+                          height: 44,
                           borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            thumbUrl,
-                            width: 44,
-                            height: 44,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => const SizedBox(
-                              width: 44,
-                              height: 44,
-                              child: Icon(Icons.music_note_rounded),
-                            ),
-                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(

@@ -7,6 +7,7 @@ import 'features/home/home_screen.dart';
 import 'services/audio_handler.dart';
 import 'services/audio_player_service.dart';
 import 'services/audio_router_service.dart';
+import 'services/download_service.dart';
 import 'services/library_service.dart';
 import 'services/lyrics_service.dart';
 import 'services/palette_service.dart';
@@ -15,9 +16,10 @@ import 'services/search_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Inicializa las preferencias persistentes del usuario y la Biblioteca Local.
+  // Inicializa las preferencias persistentes del usuario, Biblioteca y Gestor de Descargas Hive.
   await SettingsManager.instance.init();
   await LibraryService.instance.init();
+  await DownloadService.instance.init();
 
   // Barra de estado clara sobre el fondo oscuro e inmersivo.
   SystemChrome.setSystemUIOverlayStyle(
@@ -37,6 +39,12 @@ Future<void> main() async {
   final paletteService = PaletteService();
   final lyricsService = LyricsService();
   final libraryService = LibraryService.instance;
+
+  // Conectar dependencias al DownloadService singleton.
+  DownloadService.instance.attachDependencies(
+    audioRouter: audioRouter,
+    lyricsService: lyricsService,
+  );
 
   // Background Service: la música sigue con la pantalla apagada y los
   // controles aparecen en la pantalla de bloqueo / notificación.

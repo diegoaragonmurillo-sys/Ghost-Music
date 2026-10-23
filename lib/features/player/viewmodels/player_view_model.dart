@@ -179,8 +179,7 @@ class PlayerViewModel extends ChangeNotifier {
 
   Future<void> _updatePalette() async {
     final track = currentTrack;
-    final paletteUrl = track.fallbackArtworkUrl ?? track.artworkUrl;
-    final palette = await _palettes.fromUrl(paletteUrl);
+    final palette = await _palettes.fromTrack(track);
     if (track.id == currentTrack.id) {
       _palette = palette;
       notifyListeners();

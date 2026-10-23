@@ -56,13 +56,18 @@ class SettingsManager extends ChangeNotifier {
   static final SettingsManager instance = SettingsManager();
 
   static const String _audioQualityPrefKey = 'audio_quality';
+  static const String _downloadQualityPrefKey = 'download_quality';
 
   SharedPreferences? _prefs;
   AudioQuality _audioQuality = AudioQuality.dataSaver;
+  AudioQuality _downloadQuality = AudioQuality.high;
   bool _initialized = false;
 
-  /// Preferencia actual de calidad (por defecto [AudioQuality.dataSaver]).
+  /// Preferencia actual de calidad de streaming (por defecto [AudioQuality.dataSaver]).
   AudioQuality get audioQuality => _audioQuality;
+
+  /// Preferencia actual de calidad de descarga (por defecto [AudioQuality.high]).
+  AudioQuality get downloadQuality => _downloadQuality;
 
   /// Clave en texto plano (`data_saver`, `high`, `lossless`).
   String get audioQualityKey => _audioQuality.key;
@@ -71,8 +76,12 @@ class SettingsManager extends ChangeNotifier {
   Future<void> init() async {
     if (_initialized && _prefs != null) return;
     _prefs ??= await SharedPreferences.getInstance();
-    final saved = _prefs?.getString(_audioQualityPrefKey);
-    _audioQuality = AudioQuality.fromKey(saved);
+    final savedAudio = _prefs?.getString(_audioQualityPrefKey);
+    final savedDownload = _prefs?.getString(_downloadQualityPrefKey);
+    _audioQuality = AudioQuality.fromKey(savedAudio);
+    _downloadQuality = savedDownload != null
+        ? AudioQuality.fromKey(savedDownload)
+        : AudioQuality.high;
     _initialized = true;
     notifyListeners();
   }
@@ -83,6 +92,14 @@ class SettingsManager extends ChangeNotifier {
       await init();
     }
     return _audioQuality;
+  }
+
+  /// Lee la calidad de descarga asegurándose de haber cargado `SharedPreferences`.
+  Future<AudioQuality> getSavedDownloadQuality() async {
+    if (!_initialized) {
+      await init();
+    }
+    return _downloadQuality;
   }
 
   /// Guarda la nueva preferencia de calidad de audio localmente.
@@ -96,5 +113,18 @@ class SettingsManager extends ChangeNotifier {
   /// Guarda la preferencia usando su clave (`data_saver`, `high`, `lossless`).
   Future<void> setAudioQualityByKey(String key) {
     return setAudioQuality(AudioQuality.fromKey(key));
+  }
+
+  /// Guarda la nueva preferencia de calidad de descarga localmente.
+  Future<void> setDownloadQuality(AudioQuality quality) async {
+    _downloadQuality = quality;
+    notifyListeners();
+    _prefs ??= await SharedPreferences.getInstance();
+    await _prefs?.setString(_downloadQualityPrefKey, quality.key);
+  }
+
+  /// Guarda la preferencia de descarga usando su clave (`data_saver`, `high`, `lossless`).
+  Future<void> setDownloadQualityByKey(String key) {
+    return setDownloadQuality(AudioQuality.fromKey(key));
   }
 }

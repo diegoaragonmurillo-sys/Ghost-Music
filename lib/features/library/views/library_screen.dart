@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../services/audio_player_service.dart';
+import '../../../services/download_service.dart';
 import '../../../services/library_service.dart';
 import '../../../services/lyrics_service.dart';
 import '../../../services/palette_service.dart';
@@ -77,6 +78,7 @@ class LibraryScreen extends StatelessWidget {
     BuildContext context, {
     String? playlistId,
     bool isFavorites = false,
+    bool isDownloads = false,
   }) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -87,6 +89,7 @@ class LibraryScreen extends StatelessWidget {
           lyricsService: lyricsService,
           playlistId: playlistId,
           isFavorites: isFavorites,
+          isDownloads: isDownloads,
         ),
       ),
     );
@@ -111,10 +114,11 @@ class LibraryScreen extends StatelessWidget {
     final text = Theme.of(context).textTheme;
 
     return ListenableBuilder(
-      listenable: libraryService,
+      listenable: Listenable.merge([libraryService, DownloadService.instance]),
       builder: (context, _) {
         final favorites = libraryService.favorites;
         final playlists = libraryService.playlists;
+        final downloadedTracks = DownloadService.instance.getDownloadedTracks();
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -168,6 +172,28 @@ class LibraryScreen extends StatelessWidget {
                         : () => _openPlayer(
                               context,
                               queue: favorites,
+                              shuffle: true,
+                            ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Tarjeta destacada: "Descargas Offline"
+                  _DownloadsHeroCard(
+                    downloadsCount: downloadedTracks.length,
+                    onTap: () => _openDetail(context, isDownloads: true),
+                    onPlay: downloadedTracks.isEmpty
+                        ? null
+                        : () => _openPlayer(
+                              context,
+                              queue: downloadedTracks,
+                              shuffle: false,
+                            ),
+                    onShuffle: downloadedTracks.isEmpty
+                        ? null
+                        : () => _openPlayer(
+                              context,
+                              queue: downloadedTracks,
                               shuffle: true,
                             ),
                   ),
@@ -366,6 +392,120 @@ class _FavoritesHeroCard extends StatelessWidget {
                 icon: const Icon(
                   Icons.play_arrow_rounded,
                   color: AppTheme.accent,
+                  size: 24,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DownloadsHeroCard extends StatelessWidget {
+  const _DownloadsHeroCard({
+    required this.downloadsCount,
+    required this.onTap,
+    required this.onPlay,
+    required this.onShuffle,
+  });
+
+  final int downloadsCount;
+  final VoidCallback onTap;
+  final VoidCallback? onPlay;
+  final VoidCallback? onShuffle;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF0F766E), // Emerald/Teal oscuro
+                Color(0xFF1E3A8A), // Indigo profundo
+                Color(0xFF0F172A), // Slate noche
+              ],
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x330D9488),
+                blurRadius: 24,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(
+                  Icons.arrow_circle_down_rounded,
+                  color: Colors.white,
+                  size: 32,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Descargas Offline',
+                      style: text.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$downloadsCount ${downloadsCount == 1 ? 'pista disponible' : 'pistas disponibles'}',
+                      style: text.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.82),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Aleatorio',
+                onPressed: onShuffle,
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white.withValues(alpha: 0.18),
+                ),
+                icon: const Icon(
+                  Icons.shuffle_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 6),
+              IconButton(
+                tooltip: 'Reproducir descargas',
+                onPressed: onPlay,
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white,
+                ),
+                icon: const Icon(
+                  Icons.play_arrow_rounded,
+                  color: Color(0xFF0F766E),
                   size: 24,
                 ),
               ),

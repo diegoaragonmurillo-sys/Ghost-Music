@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:audio_service/audio_service.dart';
@@ -7,6 +8,7 @@ import 'package:just_audio/just_audio.dart';
 
 import '../features/player/models/track.dart';
 import 'audio_router_service.dart';
+import 'download_service.dart';
 import 'search_service.dart';
 
 /// Inicializa el Background Service de audio. Debe llamarse una sola vez
@@ -219,17 +221,31 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
         throw StateError('No se pudo resolver el URL de audio');
       }
 
+      final isLocalFile = !streamUrl.startsWith('http://') &&
+          !streamUrl.startsWith('https://');
+
       try {
-        await player.setAudioSource(
-          AudioSource.uri(
+        final AudioSource source;
+        final mediaTag = index < items.length ? items[index] : null;
+        if (isLocalFile) {
+          final cleanPath = streamUrl.startsWith('file://')
+              ? Uri.parse(streamUrl).toFilePath()
+              : streamUrl;
+          source = AudioSource.file(
+            cleanPath,
+            tag: mediaTag,
+          );
+        } else {
+          source = AudioSource.uri(
             Uri.parse(streamUrl),
             headers: const {
               'User-Agent':
                   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
             },
-            tag: index < items.length ? items[index] : null,
-          ),
-        );
+            tag: mediaTag,
+          );
+        }
+        await player.setAudioSource(source);
       } catch (e) {
         // ignore: avoid_print
         print('Error al asignar setAudioSource: $e');
@@ -264,15 +280,26 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
     );
   }
 
-  static MediaItem _toMediaItem(Track t) => MediaItem(
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        album: t.album.isEmpty ? 'YouTube Music' : t.album,
-        duration: t.duration,
-        artUri: Uri.parse(t.artworkUrl),
-        extras: {'url': t.audioUrl},
-      );
+  static MediaItem _toMediaItem(Track t) {
+    Uri artUri;
+    final pkg = DownloadService.instance.getPackage(t.id);
+    if (pkg?.localArtworkPath != null &&
+        File(pkg!.localArtworkPath!).existsSync()) {
+      artUri = Uri.file(pkg.localArtworkPath!);
+    } else {
+      artUri = Uri.parse(t.artworkUrl);
+    }
+
+    return MediaItem(
+      id: t.id,
+      title: t.title,
+      artist: t.artist,
+      album: t.album.isEmpty ? 'YouTube Music' : t.album,
+      duration: t.duration,
+      artUri: artUri,
+      extras: {'url': t.audioUrl},
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // Comandos (UI + sistema operativo)

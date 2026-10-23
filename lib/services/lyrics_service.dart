@@ -1,17 +1,27 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
 import '../features/player/models/lyrics.dart';
 import '../features/player/models/track.dart';
+import 'download_service.dart';
 
-/// Servicio de letras sincronizadas mediante LRCLIB (`https://lrclib.net/api/search`).
+/// Servicio de letras sincronizadas mediante LRCLIB (`https://lrclib.net/api/search`)
+/// y Nivel 0 Local-First (archivos `.lrc` descargados).
 class LyricsService {
-  LyricsService({http.Client? httpClient})
-      : _http = httpClient ?? http.Client();
+  LyricsService({
+    http.Client? httpClient,
+    DownloadService? downloadService,
+  })  : _http = httpClient ?? http.Client(),
+        _downloadService = downloadService;
 
   final http.Client _http;
+  final DownloadService? _downloadService;
   final Map<String, Lyrics?> _cache = {};
+
+  DownloadService get _downloads =>
+      _downloadService ?? DownloadService.instance;
 
   static const _host = 'lrclib.net';
   static const _headers = {
@@ -52,6 +62,37 @@ class LyricsService {
     return lines;
   }
 
+  /// Convierte un objeto [Lyrics] a formato LRC estándar para almacenamiento offline.
+  String serializeToLrc(Lyrics lyrics) {
+    final buffer = StringBuffer();
+    for (final line in lyrics.lines) {
+      final totalSeconds = line.time.inSeconds;
+      final minutes = totalSeconds ~/ 60;
+      final seconds = totalSeconds % 60;
+      final centiseconds = (line.time.inMilliseconds % 1000) ~/ 10;
+      final mm = minutes.toString().padLeft(2, '0');
+      final ss = seconds.toString().padLeft(2, '0');
+      final xx = centiseconds.toString().padLeft(2, '0');
+      buffer.writeln('[$mm:$ss.$xx] ${line.text}');
+    }
+    return buffer.toString().trim();
+  }
+
+  /// Obtiene texto LRC crudo para guardar offline.
+  Future<String?> fetchRawLrcForOffline(Track track) async {
+    final pkg = _downloads.getPackage(track.id);
+    if (pkg?.localLrcPath != null) {
+      final file = File(pkg!.localLrcPath!);
+      if (file.existsSync()) {
+        return file.readAsStringSync();
+      }
+    }
+
+    final lyrics = await fetch(track);
+    if (lyrics == null || lyrics.lines.isEmpty) return null;
+    return serializeToLrc(lyrics);
+  }
+
   /// Obtiene y parsea las letras sincronizadas (LRC) para [trackName] y [artistName].
   Future<List<LyricLine>> fetchSyncedLyrics({
     required String trackName,
@@ -70,8 +111,25 @@ class LyricsService {
     return lyrics.lines;
   }
 
-  /// Obtiene el objeto [Lyrics] para un [Track] con caché en memoria.
+  /// Obtiene el objeto [Lyrics] para un [Track] con Nivel 0 y caché en memoria.
   Future<Lyrics?> fetch(Track track) async {
+    // -------------------------------------------------------------------------
+    // NIVEL 0: Local First (Lectura directa desde archivo .lrc en disco)
+    // -------------------------------------------------------------------------
+    final pkg = _downloads.getPackage(track.id);
+    if (pkg?.localLrcPath != null) {
+      final localFile = File(pkg!.localLrcPath!);
+      if (localFile.existsSync()) {
+        try {
+          final content = localFile.readAsStringSync();
+          final parsed = Lyrics.parse(synced: content, plain: content);
+          if (parsed != null && parsed.lines.isNotEmpty) {
+            return _cache[track.id] = parsed;
+          }
+        } catch (_) {}
+      }
+    }
+
     if (_cache.containsKey(track.id)) return _cache[track.id];
 
     final title = _cleanForLookup(track.title);

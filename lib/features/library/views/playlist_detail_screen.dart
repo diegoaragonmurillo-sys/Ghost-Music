@@ -4,17 +4,20 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/duration_formatter.dart';
+import '../../../core/widgets/track_artwork_image.dart';
 import '../../../services/audio_player_service.dart';
+import '../../../services/download_service.dart';
 import '../../../services/library_service.dart';
 import '../../../services/lyrics_service.dart';
 import '../../../services/palette_service.dart';
+import '../../downloads/widgets/download_button.dart';
 import '../../player/models/track.dart';
 import '../../player/viewmodels/player_view_model.dart';
 import '../../player/views/player_screen.dart';
 import '../widgets/add_to_playlist_sheet.dart';
 
-/// Vista de detalle tanto para "Canciones que te gustan" (Favoritos) como
-/// para una [Playlist] específica creada por el usuario.
+/// Vista de detalle para "Canciones que te gustan" (Favoritos),
+/// "Descargas Offline" o una [Playlist] específica.
 class PlaylistDetailScreen extends StatelessWidget {
   const PlaylistDetailScreen({
     super.key,
@@ -24,6 +27,7 @@ class PlaylistDetailScreen extends StatelessWidget {
     required this.lyricsService,
     this.playlistId,
     this.isFavorites = false,
+    this.isDownloads = false,
   });
 
   final LibraryService libraryService;
@@ -32,6 +36,7 @@ class PlaylistDetailScreen extends StatelessWidget {
   final LyricsService lyricsService;
   final String? playlistId;
   final bool isFavorites;
+  final bool isDownloads;
 
   void _openPlayer(
     BuildContext context, {
@@ -101,12 +106,12 @@ class PlaylistDetailScreen extends StatelessWidget {
     final text = Theme.of(context).textTheme;
 
     return ListenableBuilder(
-      listenable: libraryService,
+      listenable: Listenable.merge([libraryService, DownloadService.instance]),
       builder: (context, _) {
         final playlist =
             playlistId != null ? libraryService.getPlaylistById(playlistId!) : null;
 
-        if (!isFavorites && playlist == null) {
+        if (!isFavorites && !isDownloads && playlist == null) {
           return Scaffold(
             backgroundColor: AppTheme.background,
             appBar: AppBar(backgroundColor: AppTheme.background),
@@ -114,11 +119,18 @@ class PlaylistDetailScreen extends StatelessWidget {
           );
         }
 
-        final title = isFavorites ? 'Canciones que te gustan' : playlist!.name;
-        final tracks = isFavorites ? libraryService.favorites : playlist!.tracks;
-        final coverUrl = tracks.isNotEmpty
-            ? (tracks.first.fallbackArtworkUrl ?? tracks.first.artworkUrl)
-            : null;
+        final String title;
+        final List<Track> tracks;
+        if (isFavorites) {
+          title = 'Canciones que te gustan';
+          tracks = libraryService.favorites;
+        } else if (isDownloads) {
+          title = 'Descargas Offline';
+          tracks = DownloadService.instance.downloadedTracks;
+        } else {
+          title = playlist!.name;
+          tracks = playlist.tracks;
+        }
 
         return Scaffold(
           backgroundColor: AppTheme.background,
@@ -131,7 +143,7 @@ class PlaylistDetailScreen extends StatelessWidget {
               icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
             ),
             actions: [
-              if (!isFavorites && playlist != null)
+              if (!isFavorites && !isDownloads && playlist != null)
                 PopupMenuButton<String>(
                   color: const Color(0xFF1C1C22),
                   onSelected: (action) async {
@@ -208,14 +220,23 @@ class PlaylistDetailScreen extends StatelessWidget {
                                     Color(0xFF8C144E),
                                   ],
                                 )
-                              : const LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [
-                                    Color(0xFF2B2B36),
-                                    Color(0xFF17171D),
-                                  ],
-                                ),
+                              : (isDownloads
+                                  ? const LinearGradient(
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                      colors: [
+                                        Color(0xFF007A6E),
+                                        Color(0xFF132F3D),
+                                      ],
+                                    )
+                                  : const LinearGradient(
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                      colors: [
+                                        Color(0xFF2B2B36),
+                                        Color(0xFF17171D),
+                                      ],
+                                    )),
                         ),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(18),
@@ -227,25 +248,33 @@ class PlaylistDetailScreen extends StatelessWidget {
                                     color: Colors.white,
                                   ),
                                 )
-                              : (coverUrl != null
-                                  ? Image.network(
-                                      coverUrl,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, _, _) => const Center(
-                                        child: Icon(
-                                          Icons.queue_music_rounded,
-                                          size: 72,
-                                          color: Colors.white70,
-                                        ),
+                              : (isDownloads
+                                  ? const Center(
+                                      child: Icon(
+                                        Icons.download_done_rounded,
+                                        size: 84,
+                                        color: Colors.white,
                                       ),
                                     )
-                                  : const Center(
-                                      child: Icon(
-                                        Icons.queue_music_rounded,
-                                        size: 72,
-                                        color: Colors.white70,
-                                      ),
-                                    )),
+                                  : (tracks.isNotEmpty
+                                      ? TrackArtworkImage(
+                                          track: tracks.first,
+                                          fit: BoxFit.cover,
+                                          errorWidget: const Center(
+                                            child: Icon(
+                                              Icons.queue_music_rounded,
+                                              size: 72,
+                                              color: Colors.white70,
+                                            ),
+                                          ),
+                                        )
+                                      : const Center(
+                                          child: Icon(
+                                            Icons.queue_music_rounded,
+                                            size: 72,
+                                            color: Colors.white70,
+                                          ),
+                                        ))),
                         ),
                       ),
                       const SizedBox(height: 20),
@@ -340,7 +369,9 @@ class PlaylistDetailScreen extends StatelessWidget {
                       child: Text(
                         isFavorites
                             ? 'Marca canciones con el corazón para verlas aquí.'
-                            : 'Esta playlist está vacía. Añade canciones desde el buscador o el reproductor.',
+                            : (isDownloads
+                                ? 'No tienes canciones descargadas.\nToca el botón de descarga en cualquier pista para escucharla sin conexión.'
+                                : 'Esta playlist está vacía. Añade canciones desde el buscador o el reproductor.'),
                         textAlign: TextAlign.center,
                         style: text.bodyMedium?.copyWith(
                           color: AppTheme.textSecondary,
@@ -361,8 +392,6 @@ class PlaylistDetailScreen extends StatelessWidget {
                     ),
                     itemBuilder: (context, index) {
                       final track = tracks[index];
-                      final thumb =
-                          track.fallbackArtworkUrl ?? track.artworkUrl;
 
                       return Dismissible(
                         key: ValueKey('${title}_${track.id}'),
@@ -382,6 +411,8 @@ class PlaylistDetailScreen extends StatelessWidget {
                         onDismissed: (_) {
                           if (isFavorites) {
                             libraryService.toggleFavorite(track);
+                          } else if (isDownloads) {
+                            DownloadService.instance.deleteDownload(track.id);
                           } else if (playlist != null) {
                             libraryService.removeTrackFromPlaylist(
                               playlist.id,
@@ -399,17 +430,11 @@ class PlaylistDetailScreen extends StatelessWidget {
                           ),
                           leading: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
-                            child: Image.network(
-                              thumb,
+                            child: TrackArtworkImage(
+                              track: track,
                               width: 52,
                               height: 52,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) => Container(
-                                width: 52,
-                                height: 52,
-                                color: const Color(0xFF1C1C22),
-                                child: const Icon(Icons.music_note_rounded),
-                              ),
                             ),
                           ),
                           title: Text(
@@ -435,7 +460,8 @@ class PlaylistDetailScreen extends StatelessWidget {
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (!isFavorites)
+                              DownloadButton(track: track),
+                              if (!isFavorites && !isDownloads)
                                 IconButton(
                                   tooltip: 'Añadir a otra playlist',
                                   onPressed: () => AddToPlaylistSheet.show(
@@ -451,10 +477,15 @@ class PlaylistDetailScreen extends StatelessWidget {
                               IconButton(
                                 tooltip: isFavorites
                                     ? 'Quitar de favoritos'
-                                    : 'Quitar de la playlist',
+                                    : (isDownloads
+                                        ? 'Eliminar descarga'
+                                        : 'Quitar de la playlist'),
                                 onPressed: () {
                                   if (isFavorites) {
                                     libraryService.toggleFavorite(track);
+                                  } else if (isDownloads) {
+                                    DownloadService.instance
+                                        .deleteDownload(track.id);
                                   } else if (playlist != null) {
                                     libraryService.removeTrackFromPlaylist(
                                       playlist.id,

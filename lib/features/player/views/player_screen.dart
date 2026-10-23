@@ -1,6 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../services/download_service.dart';
+import '../../downloads/widgets/download_button.dart';
 import '../../library/widgets/add_to_playlist_sheet.dart';
 import '../models/track.dart';
 import '../viewmodels/player_view_model.dart';
@@ -73,13 +75,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           child: Center(
                             child: AlbumArtwork(
                               url: track.artworkUrl,
+                              track: track,
                               isPlaying: _vm.isPlaying,
                               glowColor: _vm.palette.primary,
                             ),
                           ),
                         ),
                         const SizedBox(height: 16),
-                        // Título + artista + acciones de Favorito y Añadir a Playlist.
+                        // Título + artista + acciones de Favorito, Playlist y Descarga.
                         Row(
                           children: [
                             Expanded(
@@ -99,20 +102,66 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 2),
-                                    Text(
-                                      track.artist,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: text.titleMedium?.copyWith(
-                                        color: AppTheme.textSecondary,
-                                        fontWeight: FontWeight.w500,
-                                      ),
+                                    ListenableBuilder(
+                                      listenable: DownloadService.instance,
+                                      builder: (context, _) {
+                                        final isOffline = DownloadService
+                                            .instance
+                                            .isDownloaded(track.id);
+                                        return Row(
+                                          children: [
+                                            if (isOffline) ...[
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 6,
+                                                  vertical: 1.5,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: AppTheme.accent
+                                                      .withValues(alpha: 0.2),
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                  border: Border.all(
+                                                    color: AppTheme.accent
+                                                        .withValues(alpha: 0.5),
+                                                    width: 0.8,
+                                                  ),
+                                                ),
+                                                child: const Text(
+                                                  'OFFLINE',
+                                                  style: TextStyle(
+                                                    fontSize: 9,
+                                                    fontWeight: FontWeight.w800,
+                                                    letterSpacing: 0.5,
+                                                    color: AppTheme.accent,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 6),
+                                            ],
+                                            Expanded(
+                                              child: Text(
+                                                track.artist,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style:
+                                                    text.titleMedium?.copyWith(
+                                                  color: AppTheme.textSecondary,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      },
                                     ),
                                   ],
                                 ),
                               ),
                             ),
                             const SizedBox(width: 8),
+                            DownloadButton(track: track),
                             IconButton(
                               tooltip: _vm.isCurrentTrackFavorite
                                   ? 'Quitar de favoritos'
