@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
@@ -72,25 +73,30 @@ class SearchService {
     return track.copyWith(audioUrl: await resolveAudioUrl(track.id));
   }
 
-  /// URL directo del stream audio-only de mayor bitrate en contenedor MP4.
-  ///
-  /// Se filtra estrictamente por contenedor `mp4` (AAC) porque `AVPlayer`
-  /// nativo de iOS no soporta contenedores `.webm` (Opus/Vorbis).
+  /// URL directo del stream para reproducción:
+  /// - En iOS: `manifest.muxed` (MP4 progresivo) ya que `AVPlayer` no soporta
+  ///   los streams fragmentados (DASH) de `audioOnly`.
+  /// - En Android (y demás plataformas): `manifest.audioOnly` de mayor bitrate.
   Future<String> resolveAudioUrl(String videoId) async {
     final cached = _streamCache[videoId];
     if (cached != null) return cached;
 
     try {
       final manifest = await _yt.videos.streams.getManifest(videoId);
-      final mp4Streams = manifest.audioOnly
-          .where((s) => s.container.name == 'mp4')
-          .toList();
+      final StreamInfo? streamInfo;
+      if (Platform.isIOS) {
+        streamInfo = manifest.muxed.isEmpty
+            ? null
+            : manifest.muxed.withHighestBitrate();
+      } else {
+        streamInfo = manifest.audioOnly.isEmpty
+            ? null
+            : manifest.audioOnly.withHighestBitrate();
+      }
 
-      final AudioOnlyStreamInfo? streamInfo =
-          mp4Streams.isEmpty ? null : mp4Streams.withHighestBitrate();
       if (streamInfo == null) {
         throw const SearchException(
-          'No se encontró un stream de audio en formato MP4 compatible con iOS',
+          'No se encontró un stream compatible disponible para este video',
         );
       }
 
