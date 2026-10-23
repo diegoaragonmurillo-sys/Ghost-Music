@@ -110,6 +110,8 @@ class AudioRouterService {
     }
   }
 
+  static final _ytVideoIdRegex = RegExp(r'^[a-zA-Z0-9_-]{11}$');
+
   /// Proveedor Lossless (Deezer FLAC).
   Future<String> _fetchFromDeezer(Track track) async {
     throw Exception('API no implementada aún');
@@ -122,6 +124,25 @@ class AudioRouterService {
 
   /// Proveedor Data Saver (YouTube 128kbps).
   Future<String> _fetchFromYouTube(Track track) async {
-    return searchService.resolveAudioUrl(track.id);
+    if (_ytVideoIdRegex.hasMatch(track.id)) {
+      return searchService.resolveAudioUrl(track.id);
+    }
+
+    // Si el ID no es de YouTube (por ejemplo, proviene de Deezer 'dz_...'),
+    // buscamos la canción en YouTube por título y artista.
+    final query = '${track.artist} - ${track.title}';
+    final results = await searchService.search(query, limit: 3);
+    if (results.isNotEmpty) {
+      return searchService.resolveAudioUrl(results.first.id);
+    }
+
+    final fallback = await searchService.search(track.title, limit: 1);
+    if (fallback.isNotEmpty) {
+      return searchService.resolveAudioUrl(fallback.first.id);
+    }
+
+    throw Exception(
+      'No se encontró fuente de audio en YouTube para "${track.title}" de ${track.artist}',
+    );
   }
 }

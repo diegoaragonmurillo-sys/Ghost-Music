@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 /// títulos y alto contraste sobre fondos difuminados.
 abstract final class AppTheme {
   static const Color background = Color(0xFF0A0A0C);
+  static const Color surfaceElevated = Color(0xFF1C1C24);
   static const Color accent = Color(0xFFFA2D48); // rojo estilo Apple Music
   static const Color textPrimary = Colors.white;
   static const Color textSecondary = Color(0xB3FFFFFF); // 70 %

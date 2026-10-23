@@ -8,7 +8,9 @@ import 'package:just_audio/just_audio.dart';
 
 import '../features/player/models/track.dart';
 import 'audio_router_service.dart';
+import 'discovery_service.dart';
 import 'download_service.dart';
+import 'history_service.dart';
 import 'search_service.dart';
 
 /// Inicializa el Background Service de audio. Debe llamarse una sola vez
@@ -84,9 +86,28 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
     return null;
   }
 
-  List<Track> _tracks = const [];
+  List<Track> _tracks = [];
   int _currentIndex = 0;
   int _loadToken = 0;
+  bool _recordedForCurrentTrack = false;
+  bool _autoplayEnabled = true;
+  bool _fetchingAutoplay = false;
+
+  bool get autoplayEnabled => _autoplayEnabled;
+  set autoplayEnabled(bool value) {
+    if (_autoplayEnabled != value) {
+      _autoplayEnabled = value;
+      _autoplayController.add(value);
+    }
+  }
+
+  final StreamController<bool> _autoplayController =
+      StreamController<bool>.broadcast();
+  Stream<bool> get autoplayStream => _autoplayController.stream;
+
+  final StreamController<List<Track>> _queueController =
+      StreamController<List<Track>>.broadcast();
+  Stream<List<Track>> get queueStream => _queueController.stream;
 
   List<Track> get currentTracks => List.unmodifiable(_tracks);
   int get currentTrackIndex => _currentIndex;
@@ -114,6 +135,18 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
     player.playingStream.listen((_) => _broadcastState());
     player.shuffleModeEnabledStream.listen((_) => _broadcastState());
     player.loopModeStream.listen((_) => _broadcastState());
+
+    // Al superar 15 segundos de reproducción continua de la pista actual,
+    // se registra automáticamente en el historial local.
+    player.positionStream.listen((pos) {
+      if (!_recordedForCurrentTrack && pos >= const Duration(seconds: 15)) {
+        final track = currentTrack;
+        if (track != null) {
+          _recordedForCurrentTrack = true;
+          unawaited(HistoryService.instance.recordPlay(track));
+        }
+      }
+    });
 
     // Al terminar una pista, avanza o repite según el modo actual.
     player.processingStateStream.listen((state) {
@@ -158,10 +191,152 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
       await _playIndex(_currentIndex + 1, autoPlay: true);
     } else if (player.loopMode == LoopMode.all) {
       await _playIndex(0, autoPlay: true);
+    } else if (_autoplayEnabled) {
+      await _triggerAutoplay();
+    } else if (_autoplayEnabled) {
+      await _triggerAutoplay();
     } else {
       await player.pause();
       await player.seek(Duration.zero);
     }
+  }
+
+  /// Radio infinita / Autoplay: busca temas afines para seguir reproduciendo
+  /// sin interrupción cuando la cola se agota.
+  Future<void> _triggerAutoplay() async {
+    if (_fetchingAutoplay) return;
+    _fetchingAutoplay = true;
+
+    try {
+      final track = currentTrack;
+      List<Track> candidates = const [];
+      if (track != null && track.artist.trim().isNotEmpty) {
+        candidates =
+            await DiscoveryService.instance.fetchRelatedTracks(track.artist);
+      }
+      if (candidates.isEmpty) {
+        candidates = await DiscoveryService.instance.getTopTracks();
+      }
+
+      final existingIds = _tracks.map((t) => t.id).toSet();
+      final newTracks = candidates
+          .where((t) => !existingIds.contains(t.id))
+          .take(5)
+          .toList();
+
+      if (newTracks.isNotEmpty) {
+        _tracks.addAll(newTracks);
+        final items = _tracks.map(_toMediaItem).toList();
+        queue.add(items);
+        _queueController.add(List.unmodifiable(_tracks));
+        await _playIndex(_currentIndex + 1, autoPlay: true);
+        return;
+      }
+    } catch (_) {
+      // Ignora errores de conexión y finaliza limpiamente
+    } finally {
+      _fetchingAutoplay = false;
+    }
+
+    await player.pause();
+    await player.seek(Duration.zero);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mutaciones de la cola interactiva ("A continuación")
+  // ---------------------------------------------------------------------------
+
+  /// Inserta una pista para ser reproducida justo a continuación de la actual.
+  void insertNext(Track track) {
+    if (_tracks.isEmpty) {
+      loadTracks([track], initialIndex: 0, autoPlay: true);
+      return;
+    }
+    final insertPos = (_currentIndex + 1).clamp(0, _tracks.length);
+    _tracks.insert(insertPos, track);
+    final items = _tracks.map(_toMediaItem).toList();
+    queue.add(items);
+    _queueController.add(List.unmodifiable(_tracks));
+    _broadcastState();
+  }
+
+  /// Añade una pista al final de la cola de reproducción actual.
+  void appendToQueue(Track track) {
+    if (_tracks.isEmpty) {
+      loadTracks([track], initialIndex: 0, autoPlay: true);
+      return;
+    }
+    _tracks.add(track);
+    final items = _tracks.map(_toMediaItem).toList();
+    queue.add(items);
+    _queueController.add(List.unmodifiable(_tracks));
+    _broadcastState();
+  }
+
+  /// Calcula el nuevo [currentIndex] tras reordenar un elemento de [oldIndex] a [targetIndex].
+  static int calculateReorderIndex(
+    int currentIndex,
+    int oldIndex,
+    int targetIndex,
+  ) {
+    if (currentIndex == oldIndex) {
+      return targetIndex;
+    } else if (oldIndex < currentIndex && targetIndex >= currentIndex) {
+      return currentIndex - 1;
+    } else if (oldIndex > currentIndex && targetIndex <= currentIndex) {
+      return currentIndex + 1;
+    }
+    return currentIndex;
+  }
+
+  /// Reordena un elemento en la cola (drag & drop).
+  void reorderQueue(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _tracks.length) return;
+    final targetIndex = newIndex.clamp(0, _tracks.length - 1);
+    if (oldIndex == targetIndex) return;
+
+    final item = _tracks.removeAt(oldIndex);
+    _tracks.insert(targetIndex, item);
+
+    _currentIndex =
+        calculateReorderIndex(_currentIndex, oldIndex, targetIndex);
+
+    final items = _tracks.map(_toMediaItem).toList();
+    queue.add(items);
+    _queueController.add(List.unmodifiable(_tracks));
+    _broadcastState();
+  }
+
+  /// Elimina una pista de la cola en el índice especificado.
+  void removeAt(int index) {
+    if (index < 0 || index >= _tracks.length) return;
+
+    if (_tracks.length == 1) {
+      _tracks.clear();
+      queue.add([]);
+      _queueController.add([]);
+      _currentIndex = 0;
+      unawaited(player.stop());
+      _broadcastState();
+      return;
+    }
+
+    final isCurrent = index == _currentIndex;
+    _tracks.removeAt(index);
+
+    if (index < _currentIndex) {
+      _currentIndex -= 1;
+    } else if (isCurrent) {
+      if (_currentIndex >= _tracks.length) {
+        _currentIndex = _tracks.length - 1;
+      }
+      _playIndex(_currentIndex, autoPlay: player.playing);
+    }
+
+    final items = _tracks.map(_toMediaItem).toList();
+    queue.add(items);
+    _queueController.add(List.unmodifiable(_tracks));
+    _broadcastState();
   }
 
   // ---------------------------------------------------------------------------
@@ -179,6 +354,7 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
 
     final items = _tracks.map(_toMediaItem).toList();
     queue.add(items);
+    _queueController.add(List.unmodifiable(_tracks));
     await _playIndex(_currentIndex, autoPlay: autoPlay);
   }
 
@@ -186,6 +362,7 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
     if (index < 0 || index >= _tracks.length) return;
     final token = ++_loadToken;
     _currentIndex = index;
+    _recordedForCurrentTrack = false;
 
     var track = _tracks[index];
     final items = [...queue.value];
@@ -330,6 +507,8 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
       await _playIndex(_currentIndex + 1, autoPlay: true);
     } else if (player.loopMode == LoopMode.all) {
       await _playIndex(0, autoPlay: true);
+    } else if (_autoplayEnabled) {
+      await _triggerAutoplay();
     }
   }
 

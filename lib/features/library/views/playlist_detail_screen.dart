@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/duration_formatter.dart';
+import '../../../core/widgets/track_action_sheet.dart';
 import '../../../core/widgets/track_artwork_image.dart';
 import '../../../services/audio_player_service.dart';
 import '../../../services/download_service.dart';
@@ -500,6 +501,20 @@ class PlaylistDetailScreen extends StatelessWidget {
                                   color: isFavorites
                                       ? AppTheme.accent
                                       : AppTheme.textSecondary,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Más opciones',
+                                onPressed: () => TrackActionSheet.show(
+                                  context,
+                                  track: track,
+                                  audioService: audioService,
+                                  libraryService: libraryService,
+                                ),
+                                icon: const Icon(
+                                  Icons.more_vert_rounded,
+                                  color: AppTheme.textSecondary,
+                                  size: 20,
                                 ),
                               ),
                             ],

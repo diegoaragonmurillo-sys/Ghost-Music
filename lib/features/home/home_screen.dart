@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/duration_formatter.dart';
+import '../../core/widgets/track_action_sheet.dart';
 import '../../core/widgets/track_artwork_image.dart';
 import '../../services/audio_player_service.dart';
 import '../../services/library_service.dart';
@@ -18,6 +19,7 @@ import '../player/models/track.dart';
 import '../player/viewmodels/player_view_model.dart';
 import '../player/views/player_screen.dart';
 import '../settings/settings_screen.dart';
+import 'views/discover_view.dart';
 
 /// Pantalla raíz con navegación entre Buscar y Biblioteca Local (estilo Apple Music),
 /// manteniendo el MiniPlayer flotando sobre la barra inferior.
@@ -168,6 +170,13 @@ class _HomeScreenState extends State<HomeScreen> {
               child: IndexedStack(
                 index: _selectedTabIndex,
                 children: [
+                  DiscoverView(
+                    audioService: widget.audioService,
+                    paletteService: widget.paletteService,
+                    lyricsService: widget.lyricsService,
+                    libraryService: _library,
+                    onPlayTrack: _openPlayer,
+                  ),
                   _buildSearchTab(text),
                   LibraryScreen(
                     libraryService: _library,
@@ -216,6 +225,10 @@ class _HomeScreenState extends State<HomeScreen> {
             fontWeight: FontWeight.w500,
           ),
           items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home_filled),
+              label: 'Inicio',
+            ),
             BottomNavigationBarItem(
               icon: Icon(Icons.search_rounded),
               label: 'Buscar',
@@ -379,6 +392,8 @@ class _HomeScreenState extends State<HomeScreen> {
             return _TrackTile(
               track: track,
               isFavorite: isFav,
+              audioService: widget.audioService,
+              libraryService: _library,
               onTap: () => _openPlayer(queue: _results, index: index),
               onToggleFavorite: () => _library.toggleFavorite(track),
               onAddToPlaylist: () => AddToPlaylistSheet.show(
@@ -452,6 +467,8 @@ class _TrackTile extends StatelessWidget {
     required this.onTap,
     required this.onToggleFavorite,
     required this.onAddToPlaylist,
+    this.audioService,
+    this.libraryService,
   });
 
   final Track track;
@@ -459,6 +476,8 @@ class _TrackTile extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onToggleFavorite;
   final VoidCallback onAddToPlaylist;
+  final AudioPlayerService? audioService;
+  final LibraryService? libraryService;
 
   @override
   Widget build(BuildContext context) {
@@ -527,6 +546,20 @@ class _TrackTile extends StatelessWidget {
                 Icons.playlist_add_rounded,
                 color: AppTheme.textSecondary,
                 size: 24,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Más opciones',
+              onPressed: () => TrackActionSheet.show(
+                context,
+                track: track,
+                audioService: audioService,
+                libraryService: libraryService,
+              ),
+              icon: const Icon(
+                Icons.more_vert_rounded,
+                color: AppTheme.textSecondary,
+                size: 20,
               ),
             ),
           ],

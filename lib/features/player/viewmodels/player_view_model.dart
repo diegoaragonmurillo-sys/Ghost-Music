@@ -70,7 +70,11 @@ class PlayerViewModel extends ChangeNotifier {
   String? _error;
 
   // ---- Getters expuestos a la vista ----
-  Track get currentTrack => _queue[_currentIndex];
+  AudioPlayerService get audioService => _audio;
+  Track get currentTrack =>
+      (_queue.isNotEmpty && _currentIndex >= 0 && _currentIndex < _queue.length)
+          ? _queue[_currentIndex]
+          : const Track(id: '', title: '', artist: '', artworkUrl: '');
   List<Track> get queue => List.unmodifiable(_queue);
   bool get isPlaying => _isPlaying;
   bool get isLoading => _isLoading;
@@ -163,6 +167,14 @@ class PlayerViewModel extends ChangeNotifier {
       }))
       ..add(_audio.loopModeStream.listen((m) {
         _loopMode = m;
+        notifyListeners();
+      }))
+      ..add(_audio.queueStream.listen((updatedQueue) {
+        _queue.clear();
+        _queue.addAll(updatedQueue);
+        if (_currentIndex >= _queue.length) {
+          _currentIndex = _queue.isEmpty ? 0 : _queue.length - 1;
+        }
         notifyListeners();
       }));
 

@@ -8,6 +8,7 @@ import 'services/audio_handler.dart';
 import 'services/audio_player_service.dart';
 import 'services/audio_router_service.dart';
 import 'services/download_service.dart';
+import 'services/history_service.dart';
 import 'services/library_service.dart';
 import 'services/lyrics_service.dart';
 import 'services/palette_service.dart';
@@ -19,6 +20,7 @@ Future<void> main() async {
   // Inicializa las preferencias persistentes del usuario, Biblioteca y Gestor de Descargas Hive.
   await SettingsManager.instance.init();
   await LibraryService.instance.init();
+  await HistoryService.instance.init();
   await DownloadService.instance.init();
 
   // Barra de estado clara sobre el fondo oscuro e inmersivo.

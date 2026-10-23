@@ -10,6 +10,8 @@ import '../widgets/album_artwork.dart';
 import '../widgets/blurred_background.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/playback_progress_bar.dart';
+import '../widgets/queue_sheet.dart';
+import '../widgets/sleep_timer_sheet.dart';
 import 'immersive_lyrics_view.dart';
 
 /// Pantalla "Now Playing" (Vista en MVVM). Solo renderiza estado del
@@ -215,26 +217,66 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           onRepeat: _vm.cycleLoopMode,
                         ),
                         const SizedBox(height: 12),
-                        TextButton.icon(
-                          onPressed: _openImmersiveLyrics,
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            backgroundColor:
-                                Colors.white.withValues(alpha: 0.12),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 10,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            IconButton(
+                              tooltip: 'Cola de reproducción',
+                              icon: const Icon(
+                                Icons.queue_music_rounded,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                              onPressed: () => QueueSheet.show(
+                                context,
+                                audioService: _vm.audioService,
+                              ),
                             ),
-                            shape: const StadiumBorder(),
-                          ),
-                          icon: const Icon(Icons.lyrics_rounded, size: 18),
-                          label: const Text(
-                            'Letras sincronizadas',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -0.2,
+                            const SizedBox(width: 8),
+                            TextButton.icon(
+                              onPressed: _openImmersiveLyrics,
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                backgroundColor:
+                                    Colors.white.withValues(alpha: 0.12),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 10,
+                                ),
+                                shape: const StadiumBorder(),
+                              ),
+                              icon: const Icon(Icons.lyrics_rounded, size: 18),
+                              label: const Text(
+                                'Letras',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
                             ),
-                          ),
+                            const SizedBox(width: 8),
+                            StreamBuilder<Duration?>(
+                              stream: _vm.audioService.sleepTimerStream,
+                              builder: (context, _) {
+                                final active =
+                                    _vm.audioService.isSleepTimerActive;
+                                return IconButton(
+                                  tooltip: 'Temporizador de apagado',
+                                  icon: Icon(
+                                    Icons.bedtime_rounded,
+                                    color: active
+                                        ? AppTheme.accent
+                                        : Colors.white70,
+                                    size: 22,
+                                  ),
+                                  onPressed: () => SleepTimerSheet.show(
+                                    context,
+                                    audioService: _vm.audioService,
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
                         ),
                         if (_vm.error != null)
                           Padding(
