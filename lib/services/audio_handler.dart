@@ -5,6 +5,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../features/player/models/track.dart';
+import 'search_service.dart';
 
 /// Inicializa el Background Service de audio. Debe llamarse una sola vez
 /// en `main()` antes de `runApp`.
@@ -46,6 +47,22 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
   static const _restartThreshold = Duration(seconds: 3);
 
   final AudioPlayer player = AudioPlayer();
+  SearchService? searchService;
+
+  List<Track> _tracks = const [];
+  int _currentIndex = 0;
+  int _loadToken = 0;
+
+  List<Track> get currentTracks => List.unmodifiable(_tracks);
+  int get currentTrackIndex => _currentIndex;
+  Track? get currentTrack =>
+      (_tracks.isNotEmpty && _currentIndex >= 0 && _currentIndex < _tracks.length)
+          ? _tracks[_currentIndex]
+          : null;
+
+  final StreamController<Track?> _currentTrackController =
+      StreamController<Track?>.broadcast();
+  Stream<Track?> get currentTrackStream => _currentTrackController.stream;
 
   Future<void> _init() async {
     // Sesión de audio "música": gestiona interrupciones (llamadas, Siri),
@@ -63,39 +80,130 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
     player.shuffleModeEnabledStream.listen((_) => _broadcastState());
     player.loopModeStream.listen((_) => _broadcastState());
 
-    // Metadatos de la pista actual → pantalla de bloqueo.
-    player.currentIndexStream.listen((index) {
-      final items = queue.value;
-      if (index != null && index < items.length) mediaItem.add(items[index]);
+    // Al terminar una pista, avanza o repite según el modo actual.
+    player.processingStateStream.listen((state) {
+      if (state == ProcessingState.completed) {
+        _onTrackCompleted();
+      }
     });
 
     // Cuando se conoce la duración real, se actualiza el MediaItem para que
     // la barra de progreso del lock screen sea precisa.
     player.durationStream.listen((duration) {
-      final index = player.currentIndex;
+      final index = _currentIndex;
       final items = [...queue.value];
-      if (duration == null || index == null || index >= items.length) return;
+      if (duration == null || index < 0 || index >= items.length) return;
       final updated = items[index].copyWith(duration: duration);
       items[index] = updated;
       queue.add(items);
       mediaItem.add(updated);
+      if (index < _tracks.length) {
+        _tracks[index] = _tracks[index].copyWith(duration: duration);
+      }
     });
   }
 
+  Future<void> _onTrackCompleted() async {
+    if (_tracks.isEmpty) return;
+    if (player.loopMode == LoopMode.one) {
+      await player.seek(Duration.zero);
+      await player.play();
+      return;
+    }
+    if (_currentIndex + 1 < _tracks.length) {
+      await _playIndex(_currentIndex + 1, autoPlay: true);
+    } else if (player.loopMode == LoopMode.all) {
+      await _playIndex(0, autoPlay: true);
+    } else {
+      await player.pause();
+      await player.seek(Duration.zero);
+    }
+  }
+
   // ---------------------------------------------------------------------------
-  // Carga de cola
+  // Carga de cola y resolución de streams bajo demanda
   // ---------------------------------------------------------------------------
 
-  Future<void> loadTracks(List<Track> tracks, {int initialIndex = 0}) async {
-    final items = tracks.map(_toMediaItem).toList();
+  Future<void> loadTracks(
+    List<Track> tracks, {
+    int initialIndex = 0,
+    bool autoPlay = true,
+  }) async {
+    if (tracks.isEmpty) return;
+    _tracks = List<Track>.from(tracks);
+    _currentIndex = initialIndex.clamp(0, _tracks.length - 1);
+
+    final items = _tracks.map(_toMediaItem).toList();
     queue.add(items);
-    mediaItem.add(items[initialIndex]);
-    await player.setAudioSources(
-      [
-        for (final item in items)
-          AudioSource.uri(Uri.parse(item.extras!['url'] as String), tag: item),
-      ],
-      initialIndex: initialIndex,
+    await _playIndex(_currentIndex, autoPlay: autoPlay);
+  }
+
+  Future<void> _playIndex(int index, {required bool autoPlay}) async {
+    if (index < 0 || index >= _tracks.length) return;
+    final token = ++_loadToken;
+    _currentIndex = index;
+
+    var track = _tracks[index];
+    final items = [...queue.value];
+    if (index < items.length) {
+      mediaItem.add(items[index]);
+    }
+    _currentTrackController.add(track);
+    _broadcastState(forceLoading: true);
+
+    try {
+      // Si el track aún no tiene el URL directo del stream, lo resolvemos con
+      // SearchService obteniendo el manifiesto audioOnly de YouTube.
+      if (!track.isResolved) {
+        final resolver = searchService;
+        if (resolver == null) {
+          throw StateError('SearchService no configurado en GhostAudioHandler');
+        }
+        track = await resolver.resolveStream(track);
+        if (token != _loadToken) return;
+        _tracks[index] = track;
+        if (index < items.length) {
+          items[index] = _toMediaItem(track);
+          queue.add(items);
+          mediaItem.add(items[index]);
+        }
+        _currentTrackController.add(track);
+      }
+
+      final url = track.audioUrl;
+      if (url == null || url.isEmpty) {
+        throw StateError('No se pudo resolver el URL de audio');
+      }
+
+      await player.setAudioSource(
+        AudioSource.uri(Uri.parse(url), tag: items[index]),
+      );
+      if (token != _loadToken) return;
+
+      if (autoPlay) {
+        unawaited(player.play());
+      }
+      // Pre-resuelve la siguiente pista en segundo plano para cambio instantáneo.
+      _prefetchNext(index + 1);
+    } catch (e) {
+      _broadcastState();
+      rethrow;
+    }
+  }
+
+  void _prefetchNext(int nextIndex) {
+    final resolver = searchService;
+    if (resolver == null || nextIndex < 0 || nextIndex >= _tracks.length) {
+      return;
+    }
+    final next = _tracks[nextIndex];
+    if (next.isResolved) return;
+    unawaited(
+      resolver.resolveStream(next).then((resolved) {
+        if (nextIndex < _tracks.length && _tracks[nextIndex].id == resolved.id) {
+          _tracks[nextIndex] = resolved;
+        }
+      }).catchError((_) {}),
     );
   }
 
@@ -103,7 +211,8 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
         id: t.id,
         title: t.title,
         artist: t.artist,
-        album: t.album,
+        album: t.album.isEmpty ? 'YouTube Music' : t.album,
+        duration: t.duration,
         artUri: Uri.parse(t.artworkUrl),
         extras: {'url': t.audioUrl},
       );
@@ -123,30 +232,33 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
 
   @override
   Future<void> skipToNext() async {
-    if (player.hasNext) await player.seekToNext();
+    if (_tracks.isEmpty) return;
+    if (_currentIndex + 1 < _tracks.length) {
+      await _playIndex(_currentIndex + 1, autoPlay: true);
+    } else if (player.loopMode == LoopMode.all) {
+      await _playIndex(0, autoPlay: true);
+    }
   }
 
   @override
   Future<void> skipToPrevious() async {
-    if (player.position > _restartThreshold || !player.hasPrevious) {
+    if (_tracks.isEmpty) return;
+    if (player.position > _restartThreshold || _currentIndex <= 0) {
       await player.seek(Duration.zero);
     } else {
-      await player.seekToPrevious();
+      await _playIndex(_currentIndex - 1, autoPlay: true);
     }
   }
 
   @override
   Future<void> skipToQueueItem(int index) async {
-    if (index < 0 || index >= queue.value.length) return;
-    final effective =
-        player.shuffleModeEnabled ? player.shuffleIndices[index] : index;
-    await player.seek(Duration.zero, index: effective);
+    if (index < 0 || index >= _tracks.length) return;
+    await _playIndex(index, autoPlay: true);
   }
 
   @override
   Future<void> setShuffleMode(AudioServiceShuffleMode shuffleMode) async {
     final enable = shuffleMode != AudioServiceShuffleMode.none;
-    if (enable) await player.shuffle();
     await player.setShuffleModeEnabled(enable);
   }
 
@@ -173,8 +285,18 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
   // Estado → sistema operativo
   // ---------------------------------------------------------------------------
 
-  void _broadcastState() {
+  void _broadcastState({bool forceLoading = false}) {
     final playing = player.playing;
+    final procState = forceLoading
+        ? AudioProcessingState.loading
+        : switch (player.processingState) {
+            ProcessingState.idle => AudioProcessingState.idle,
+            ProcessingState.loading => AudioProcessingState.loading,
+            ProcessingState.buffering => AudioProcessingState.buffering,
+            ProcessingState.ready => AudioProcessingState.ready,
+            ProcessingState.completed => AudioProcessingState.completed,
+          };
+
     playbackState.add(
       playbackState.value.copyWith(
         controls: [
@@ -192,18 +314,12 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
         },
         // Botones visibles en la notificación compacta de Android.
         androidCompactActionIndices: const [0, 1, 2],
-        processingState: switch (player.processingState) {
-          ProcessingState.idle => AudioProcessingState.idle,
-          ProcessingState.loading => AudioProcessingState.loading,
-          ProcessingState.buffering => AudioProcessingState.buffering,
-          ProcessingState.ready => AudioProcessingState.ready,
-          ProcessingState.completed => AudioProcessingState.completed,
-        },
+        processingState: procState,
         playing: playing,
         updatePosition: player.position,
         bufferedPosition: player.bufferedPosition,
         speed: player.speed,
-        queueIndex: player.currentIndex,
+        queueIndex: _currentIndex,
         shuffleMode: player.shuffleModeEnabled
             ? AudioServiceShuffleMode.all
             : AudioServiceShuffleMode.none,

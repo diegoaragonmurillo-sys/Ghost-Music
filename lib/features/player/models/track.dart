@@ -1,46 +1,54 @@
 /// Modelo inmutable de una pista musical.
+///
+/// [audioUrl] es `null` hasta que el stream se resuelve justo antes de
+/// reproducir: los URLs de YouTube caducan (~6 h) y resolverlos todos al
+/// buscar sería lento, así que la resolución es *lazy* (ver SearchService).
 class Track {
   const Track({
     required this.id,
     required this.title,
     required this.artist,
-    required this.album,
-    required this.audioUrl,
     required this.artworkUrl,
+    this.album = '',
+    this.fallbackArtworkUrl,
+    this.audioUrl,
+    this.duration,
   });
 
+  /// ID de vídeo de YouTube.
   final String id;
   final String title;
   final String artist;
   final String album;
-  final String audioUrl;
-  final String artworkUrl;
-}
 
-/// Cola de prueba (audio libre de SoundHelix + carátulas placeholder).
-const List<Track> demoQueue = [
-  Track(
-    id: '1',
-    title: 'Midnight Echoes',
-    artist: 'Ghost Ensemble',
-    album: 'Phantom Frequencies',
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-    artworkUrl: 'https://picsum.photos/seed/ghostmusic1/800/800',
-  ),
-  Track(
-    id: '2',
-    title: 'Neon Haze',
-    artist: 'Spectral Waves',
-    album: 'After Hours',
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-    artworkUrl: 'https://picsum.photos/seed/ghostmusic2/800/800',
-  ),
-  Track(
-    id: '3',
-    title: 'Velvet Static',
-    artist: 'The Apparitions',
-    album: 'Lowlight',
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-    artworkUrl: 'https://picsum.photos/seed/ghostmusic3/800/800',
-  ),
-];
+  /// Carátula en alta resolución (maxres si existe).
+  final String artworkUrl;
+
+  /// Miniatura que siempre existe (hqdefault), usada si [artworkUrl] falla.
+  final String? fallbackArtworkUrl;
+
+  /// URL directo del stream audio-only. `null` si aún no se resolvió.
+  final String? audioUrl;
+  final Duration? duration;
+
+  bool get isResolved => audioUrl != null;
+
+  Track copyWith({String? audioUrl, Duration? duration, String? artworkUrl}) {
+    return Track(
+      id: id,
+      title: title,
+      artist: artist,
+      album: album,
+      artworkUrl: artworkUrl ?? this.artworkUrl,
+      fallbackArtworkUrl: fallbackArtworkUrl,
+      audioUrl: audioUrl ?? this.audioUrl,
+      duration: duration ?? this.duration,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) => other is Track && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
+}

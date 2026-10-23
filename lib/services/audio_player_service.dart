@@ -3,41 +3,69 @@ import 'package:just_audio/just_audio.dart';
 
 import '../features/player/models/track.dart';
 import 'audio_handler.dart';
+import 'search_service.dart';
 
 /// Fachada que consume el ViewModel.
 ///
 /// - **Comandos** → se envían al [GhostAudioHandler] (Background Service), así
 ///   la UI y la pantalla de bloqueo comparten exactamente el mismo flujo.
-/// - **Streams** → se leen del motor `just_audio` subyacente, que ofrece
-///   posición y buffer con mayor granularidad para la UI.
+/// - **Streams** → se leen del motor `just_audio` y del handler subyacente.
 class AudioPlayerService {
-  AudioPlayerService(this._handler);
+  AudioPlayerService(this._handler, {SearchService? searchService}) {
+    if (searchService != null) {
+      _handler.searchService = searchService;
+    }
+  }
 
   final GhostAudioHandler _handler;
   AudioPlayer get _player => _handler.player;
 
   Stream<PlayerState> get playerStateStream => _player.playerStateStream;
+  Stream<PlaybackState> get playbackStateStream => _handler.playbackState;
   Stream<Duration> get positionStream => _player.positionStream;
   Stream<Duration> get bufferedPositionStream =>
       _player.bufferedPositionStream;
   Stream<Duration?> get durationStream => _player.durationStream;
-  Stream<int?> get currentIndexStream => _player.currentIndexStream;
+  Stream<Track?> get currentTrackStream => _handler.currentTrackStream;
   Stream<bool> get shuffleModeEnabledStream =>
       _player.shuffleModeEnabledStream;
   Stream<LoopMode> get loopModeStream => _player.loopModeStream;
 
   bool get playing => _player.playing;
-  int? get currentIndex => _player.currentIndex;
+  int get currentIndex => _handler.currentTrackIndex;
+  Track? get currentTrack => _handler.currentTrack;
+  List<Track> get currentQueue => _handler.currentTracks;
   bool get shuffleEnabled => _player.shuffleModeEnabled;
   LoopMode get loopMode => _player.loopMode;
 
-  /// Evita recargar (y cortar la música) si la cola ya está cargada, por
-  /// ejemplo al volver a abrir la pantalla mientras suena en background.
-  Future<void> loadQueue(List<Track> tracks, {int initialIndex = 0}) async {
-    final loadedIds = _handler.queue.value.map((m) => m.id).toList();
+  /// Carga una cola de pistas y comienza a reproducir en [initialIndex].
+  /// Si la misma pista ya está activa y sonando, evita reiniciar el stream.
+  Future<void> loadQueue(
+    List<Track> tracks, {
+    int initialIndex = 0,
+    bool autoPlay = true,
+  }) async {
+    if (tracks.isEmpty) return;
+    final target = tracks[initialIndex.clamp(0, tracks.length - 1)];
+    final current = _handler.currentTrack;
+    final loadedIds = _handler.currentTracks.map((t) => t.id).toList();
     final newIds = tracks.map((t) => t.id).toList();
-    if (_listEquals(loadedIds, newIds)) return;
-    await _handler.loadTracks(tracks, initialIndex: initialIndex);
+
+    if (current != null &&
+        current.id == target.id &&
+        _listEquals(loadedIds, newIds) &&
+        _player.processingState != ProcessingState.idle) {
+      if (autoPlay && !_player.playing) {
+        await _handler.play();
+      }
+      return;
+    }
+
+    await _handler.loadTracks(
+      tracks,
+      initialIndex: initialIndex,
+      autoPlay: autoPlay,
+    );
   }
 
   Future<void> play() => _handler.play();

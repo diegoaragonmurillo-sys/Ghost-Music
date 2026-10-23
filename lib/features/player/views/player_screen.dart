@@ -1,7 +1,10 @@
+import 'dart:ui';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../../services/audio_player_service.dart';
+import '../models/lyrics.dart';
+import '../models/track.dart';
 import '../viewmodels/player_view_model.dart';
 import '../widgets/album_artwork.dart';
 import '../widgets/blurred_background.dart';
@@ -11,21 +14,20 @@ import '../widgets/playback_progress_bar.dart';
 /// Pantalla "Now Playing" (Vista en MVVM). Solo renderiza estado del
 /// [PlayerViewModel] y le delega las acciones del usuario.
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({super.key, required this.audioService, this.viewModel});
+  const PlayerScreen({
+    super.key,
+    required this.viewModel,
+  });
 
-  /// Servicio de audio compartido (conectado al Background Service).
-  final AudioPlayerService audioService;
-
-  /// Inyectable para tests; si es null se crea uno por defecto.
-  final PlayerViewModel? viewModel;
+  final PlayerViewModel viewModel;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  late final PlayerViewModel _vm =
-      widget.viewModel ?? PlayerViewModel(audioService: widget.audioService);
+  PlayerViewModel get _vm => widget.viewModel;
+  bool _showLyrics = false;
 
   @override
   void initState() {
@@ -60,14 +62,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 28),
                   child: Column(
                     children: [
-                      _Header(album: track.album),
-                      const Spacer(),
-                      AlbumArtwork(
-                        url: track.artworkUrl,
-                        isPlaying: _vm.isPlaying,
-                        glowColor: _vm.palette.primary,
+                      _Header(
+                        track: track,
+                        showLyrics: _showLyrics,
+                        onToggleLyrics: () =>
+                            setState(() => _showLyrics = !_showLyrics),
                       ),
-                      const Spacer(),
+                      const SizedBox(height: 16),
+                      Expanded(
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 350),
+                          child: _showLyrics
+                              ? _LyricsPanel(
+                                  key: const ValueKey('lyrics'),
+                                  lyrics: _vm.lyrics,
+                                  isLoading: _vm.isLoadingLyrics,
+                                  positionStream: _vm.positionStream,
+                                  onSeek: _vm.seek,
+                                )
+                              : Center(
+                                  key: const ValueKey('artwork'),
+                                  child: AlbumArtwork(
+                                    url: track.artworkUrl,
+                                    isPlaying: _vm.isPlaying,
+                                    glowColor: _vm.palette.primary,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       // Título + artista (jerarquía tipográfica Apple Music).
                       Row(
                         children: [
@@ -102,17 +125,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ),
                           ),
                           IconButton(
-                            onPressed: () {},
-                            icon: const Icon(Icons.favorite_border_rounded),
+                            tooltip: 'Letras',
+                            onPressed: () =>
+                                setState(() => _showLyrics = !_showLyrics),
+                            icon: Icon(
+                              Icons.lyrics_rounded,
+                              color: _showLyrics
+                                  ? _vm.palette.primary
+                                  : AppTheme.textSecondary,
+                            ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 16),
                       PlaybackProgressBar(
                         progressStream: _vm.progressStream,
                         onSeek: _vm.seek,
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 14),
                       PlaybackControls(
                         isPlaying: _vm.isPlaying,
                         isLoading: _vm.isLoading,
@@ -130,11 +160,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           padding: const EdgeInsets.only(top: 12),
                           child: Text(
                             _vm.error!,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.center,
-                            style: text.bodySmall?.copyWith(color: Colors.redAccent),
+                            style: text.bodySmall
+                                ?.copyWith(color: Colors.redAccent),
                           ),
                         ),
-                      const SizedBox(height: 28),
+                      const SizedBox(height: 24),
                     ],
                   ),
                 ),
@@ -148,9 +181,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.album});
+  const _Header({
+    required this.track,
+    required this.showLyrics,
+    required this.onToggleLyrics,
+  });
 
-  final String album;
+  final Track track;
+  final bool showLyrics;
+  final VoidCallback onToggleLyrics;
 
   @override
   Widget build(BuildContext context) {
@@ -160,14 +199,14 @@ class _Header extends StatelessWidget {
       child: Row(
         children: [
           IconButton(
-            onPressed: () {},
+            onPressed: () => Navigator.of(context).maybePop(),
             icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
           ),
           Expanded(
             child: Column(
               children: [
                 Text(
-                  'REPRODUCIENDO DESDE EL ÁLBUM',
+                  'REPRODUCIENDO AHORA',
                   style: text.labelSmall?.copyWith(
                     color: AppTheme.textSecondary,
                     letterSpacing: 1.2,
@@ -175,7 +214,7 @@ class _Header extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  album,
+                  track.artist,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
@@ -184,10 +223,99 @@ class _Header extends StatelessWidget {
             ),
           ),
           IconButton(
-            onPressed: () {},
-            icon: const Icon(Icons.more_horiz_rounded),
+            onPressed: onToggleLyrics,
+            icon: Icon(
+              showLyrics ? Icons.album_rounded : Icons.format_quote_rounded,
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Panel de letras sincronizadas estilo Apple Music.
+class _LyricsPanel extends StatelessWidget {
+  const _LyricsPanel({
+    super.key,
+    required this.lyrics,
+    required this.isLoading,
+    required this.positionStream,
+    required this.onSeek,
+  });
+
+  final Lyrics? lyrics;
+  final bool isLoading;
+  final Stream<Duration> positionStream;
+  final ValueChanged<Duration> onSeek;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+
+    if (isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+
+    final data = lyrics;
+    if (data == null || data.lines.isEmpty) {
+      return Center(
+        child: Text(
+          'Letra no disponible para esta canción',
+          textAlign: TextAlign.center,
+          style: text.titleMedium?.copyWith(color: AppTheme.textSecondary),
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0x26000000),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: StreamBuilder<Duration>(
+            stream: positionStream,
+            initialData: Duration.zero,
+            builder: (context, snapshot) {
+              final pos = snapshot.data ?? Duration.zero;
+              final activeIndex = data.indexAt(pos);
+
+              return ListView.builder(
+                itemCount: data.lines.length,
+                itemBuilder: (context, i) {
+                  final line = data.lines[i];
+                  final isActive = !data.isSynced || i == activeIndex;
+                  return GestureDetector(
+                    onTap: data.isSynced ? () => onSeek(line.time) : null,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 220),
+                        style: (text.titleLarge ?? const TextStyle()).copyWith(
+                          fontWeight: FontWeight.w800,
+                          height: 1.25,
+                          color: isActive
+                              ? Colors.white
+                              : const Color(0x55FFFFFF),
+                        ),
+                        child: Text(
+                          line.text.isEmpty ? '•••' : line.text,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
       ),
     );
   }

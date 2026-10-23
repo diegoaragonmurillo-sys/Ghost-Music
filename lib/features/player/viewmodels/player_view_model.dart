@@ -1,10 +1,13 @@
 import 'dart:async';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../../services/audio_player_service.dart';
+import '../../../services/lyrics_service.dart';
 import '../../../services/palette_service.dart';
+import '../models/lyrics.dart';
 import '../models/track.dart';
 
 /// Estado de progreso agrupado para la barra de reproducción.
@@ -19,35 +22,47 @@ class ProgressState {
   final Duration buffered;
   final Duration total;
 
-  static const zero =
-      ProgressState(position: Duration.zero, buffered: Duration.zero, total: Duration.zero);
+  static const zero = ProgressState(
+    position: Duration.zero,
+    buffered: Duration.zero,
+    total: Duration.zero,
+  );
 }
 
 /// ViewModel del reproductor (MVVM).
 ///
-/// - Estado "lento" (pista actual, play/pause, shuffle, paleta) se notifica
-///   vía [ChangeNotifier].
+/// - Estado "lento" (pista actual, play/pause, shuffle, paleta, letras) se
+///   notifica vía [ChangeNotifier].
 /// - Estado "rápido" (posición) se expone como [Stream] para que solo la
-///   barra de progreso se reconstruya ~60 veces/seg, no toda la pantalla.
+///   barra de progreso o las letras se reconstruyan con alta frecuencia.
 class PlayerViewModel extends ChangeNotifier {
   PlayerViewModel({
     required AudioPlayerService audioService,
     PaletteService? paletteService,
-    this._queue = demoQueue,
+    LyricsService? lyricsService,
+    required List<Track> queue,
+    int initialIndex = 0,
   })  : _audio = audioService,
-        _palettes = paletteService ?? PaletteService();
+        _palettes = paletteService ?? PaletteService(),
+        _lyricsService = lyricsService ?? LyricsService(),
+        _queue = List<Track>.from(queue),
+        _currentIndex =
+            queue.isEmpty ? 0 : initialIndex.clamp(0, queue.length - 1);
 
   final AudioPlayerService _audio;
   final PaletteService _palettes;
+  final LyricsService _lyricsService;
   final List<Track> _queue;
   final List<StreamSubscription<dynamic>> _subs = [];
 
-  int _currentIndex = 0;
+  int _currentIndex;
   bool _isPlaying = false;
   bool _isLoading = true;
   bool _shuffle = false;
   LoopMode _loopMode = LoopMode.off;
   ArtworkPalette _palette = ArtworkPalette.fallback;
+  Lyrics? _lyrics;
+  bool _isLoadingLyrics = false;
   String? _error;
 
   // ---- Getters expuestos a la vista ----
@@ -58,14 +73,17 @@ class PlayerViewModel extends ChangeNotifier {
   bool get shuffle => _shuffle;
   LoopMode get loopMode => _loopMode;
   ArtworkPalette get palette => _palette;
+  Lyrics? get lyrics => _lyrics;
+  bool get isLoadingLyrics => _isLoadingLyrics;
   String? get error => _error;
 
+  Stream<Duration> get positionStream => _audio.positionStream;
+
   Stream<ProgressState> get progressStream {
-    // Combina posición + buffer + duración en un único stream.
     late StreamController<ProgressState> controller;
     var position = Duration.zero;
     var buffered = Duration.zero;
-    var total = Duration.zero;
+    var total = currentTrack.duration ?? Duration.zero;
     final subs = <StreamSubscription<dynamic>>[];
 
     void emit() => controller.add(
@@ -84,7 +102,7 @@ class PlayerViewModel extends ChangeNotifier {
             emit();
           }))
           ..add(_audio.durationStream.listen((d) {
-            total = d ?? Duration.zero;
+            total = d ?? currentTrack.duration ?? Duration.zero;
             emit();
           }));
       },
@@ -99,28 +117,33 @@ class PlayerViewModel extends ChangeNotifier {
 
   // ---- Ciclo de vida ----
   Future<void> init() async {
-    // Sincroniza con el estado actual del servicio (puede venir sonando
-    // desde background).
-    _currentIndex = _audio.currentIndex ?? 0;
     _isPlaying = _audio.playing;
     _shuffle = _audio.shuffleEnabled;
     _loopMode = _audio.loopMode;
 
     _subs
-      ..add(_audio.playerStateStream.listen((state) {
-        final loading = state.processingState == ProcessingState.loading ||
-            state.processingState == ProcessingState.buffering;
+      ..add(_audio.playbackStateStream.listen((state) {
+        final loading =
+            state.processingState == AudioProcessingState.loading ||
+            state.processingState == AudioProcessingState.buffering;
         if (_isPlaying != state.playing || _isLoading != loading) {
           _isPlaying = state.playing;
           _isLoading = loading;
           notifyListeners();
         }
       }))
-      ..add(_audio.currentIndexStream.listen((index) {
-        if (index != null && index != _currentIndex) {
-          _currentIndex = index;
+      ..add(_audio.currentTrackStream.listen((track) {
+        if (track == null) return;
+        final idx = _queue.indexWhere((t) => t.id == track.id);
+        if (idx != -1) {
+          final changed = idx != _currentIndex;
+          _queue[idx] = track;
+          _currentIndex = idx;
           notifyListeners();
-          _updatePalette();
+          if (changed) {
+            _updatePalette();
+            _updateLyrics();
+          }
         }
       }))
       ..add(_audio.shuffleModeEnabledStream.listen((s) {
@@ -132,24 +155,38 @@ class PlayerViewModel extends ChangeNotifier {
         notifyListeners();
       }));
 
-    _updatePalette();
+    unawaited(_updatePalette());
+    unawaited(_updateLyrics());
 
     try {
-      await _audio.loadQueue(_queue);
-      _isLoading = false;
+      await _audio.loadQueue(_queue, initialIndex: _currentIndex);
     } catch (e) {
-      _error = 'No se pudo cargar el audio: $e';
+      _error = 'No se pudo reproducir el stream: $e';
       _isLoading = false;
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   Future<void> _updatePalette() async {
-    final url = currentTrack.artworkUrl;
-    final palette = await _palettes.fromUrl(url);
-    // Evita aplicar una paleta obsoleta si el usuario cambió de pista.
-    if (url == currentTrack.artworkUrl) {
+    final track = currentTrack;
+    final paletteUrl = track.fallbackArtworkUrl ?? track.artworkUrl;
+    final palette = await _palettes.fromUrl(paletteUrl);
+    if (track.id == currentTrack.id) {
       _palette = palette;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _updateLyrics() async {
+    final track = currentTrack;
+    _isLoadingLyrics = true;
+    _lyrics = null;
+    notifyListeners();
+
+    final result = await _lyricsService.fetch(track);
+    if (track.id == currentTrack.id) {
+      _lyrics = result;
+      _isLoadingLyrics = false;
       notifyListeners();
     }
   }
@@ -161,8 +198,6 @@ class PlayerViewModel extends ChangeNotifier {
 
   void next() => _audio.skipToNext();
 
-  /// La lógica "reiniciar si >3 s" vive en el AudioHandler para que la
-  /// pantalla de bloqueo se comporte igual que la UI.
   void previous() => _audio.skipToPrevious();
 
   void toggleShuffle() => _audio.setShuffle(!_shuffle);
