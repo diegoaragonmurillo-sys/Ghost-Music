@@ -39,6 +39,13 @@ Future<GhostAudioHandler> initAudioService() {
 /// sus comandos aquí, por lo que el estado siempre es coherente.
 class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   GhostAudioHandler() {
+    player.playbackEventStream.listen(
+      (event) {},
+      onError: (Object e, StackTrace st) {
+        // ignore: avoid_print
+        print('Error nativo del stream: $e');
+      },
+    );
     _init();
   }
 
@@ -170,14 +177,27 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
         _currentTrackController.add(track);
       }
 
-      final url = track.audioUrl;
-      if (url == null || url.isEmpty) {
+      final streamUrl = track.audioUrl;
+      if (streamUrl == null || streamUrl.isEmpty) {
         throw StateError('No se pudo resolver el URL de audio');
       }
 
-      await player.setAudioSource(
-        AudioSource.uri(Uri.parse(url), tag: items[index]),
-      );
+      try {
+        await player.setAudioSource(
+          AudioSource.uri(
+            Uri.parse(streamUrl),
+            headers: const {
+              'User-Agent':
+                  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+            },
+            tag: index < items.length ? items[index] : null,
+          ),
+        );
+      } catch (e) {
+        // ignore: avoid_print
+        print('Error al asignar setAudioSource: $e');
+        rethrow;
+      }
       if (token != _loadToken) return;
 
       if (autoPlay) {
