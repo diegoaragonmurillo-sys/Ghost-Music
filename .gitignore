@@ -1,0 +1,117 @@
+# ============================================================
+# Ghost Music — .gitignore
+# Nota: pubspec.lock SÍ se versiona (es una app, no un paquete).
+# ============================================================
+
+# ---------- Sistema operativo ----------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------- Varios ----------
+*.class
+*.log
+*.pyc
+*.swp
+*.swo
+*~
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+*.tmp
+*.bak
+
+# ---------- IDEs ----------
+# IntelliJ / Android Studio
+*.iml
+*.ipr
+*.iws
+.idea/
+# VS Code: se ignora todo salvo la configuración compartida útil (F5).
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ---------- Flutter / Dart / Pub ----------
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+**/build/
+/coverage/
+.widget_preview/
+*.g.dart.bak
+
+# Símbolos y ofuscación
+app.*.symbols
+app.*.map.json
+
+# ---------- Android ----------
+/android/app/debug
+/android/app/profile
+/android/app/release
+**/android/.gradle/
+**/android/captures/
+**/android/local.properties
+**/android/key.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/android/app/.cxx/
+*.jks
+*.keystore
+!debug.keystore
+
+# ---------- iOS / macOS (Xcode, CocoaPods, SPM) ----------
+**/ios/Pods/
+**/macos/Pods/
+**/ios/.symlinks/
+**/macos/.symlinks/
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Runner/GeneratedPluginRegistrant.*
+**/macos/Flutter/ephemeral/
+**/macos/Flutter/GeneratedPluginRegistrant.swift
+**/xcuserdata/
+*.xcuserstate
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.mobileprovision
+*.p12
+*.cer
+
+# ---------- Linux / Windows ----------
+**/linux/flutter/ephemeral/
+**/windows/flutter/ephemeral/
+
+# ---------- Web ----------
+/web/.dart_tool/
+
+# ---------- Secretos y credenciales (NUNCA subir) ----------
+.env
+.env.*
+!.env.example
+*.pem
+secrets.json
+**/google-services.json
+**/GoogleService-Info.plist
+firebase_options.dart.bak
