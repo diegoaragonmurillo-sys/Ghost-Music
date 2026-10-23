@@ -7,6 +7,7 @@ import 'features/home/home_screen.dart';
 import 'services/audio_handler.dart';
 import 'services/audio_player_service.dart';
 import 'services/audio_router_service.dart';
+import 'services/library_service.dart';
 import 'services/lyrics_service.dart';
 import 'services/palette_service.dart';
 import 'services/search_service.dart';
@@ -14,8 +15,9 @@ import 'services/search_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Inicializa las preferencias persistentes del usuario (Calidad de Audio).
+  // Inicializa las preferencias persistentes del usuario y la Biblioteca Local.
   await SettingsManager.instance.init();
+  await LibraryService.instance.init();
 
   // Barra de estado clara sobre el fondo oscuro e inmersivo.
   SystemChrome.setSystemUIOverlayStyle(
@@ -34,6 +36,7 @@ Future<void> main() async {
   );
   final paletteService = PaletteService();
   final lyricsService = LyricsService();
+  final libraryService = LibraryService.instance;
 
   // Background Service: la música sigue con la pantalla apagada y los
   // controles aparecen en la pantalla de bloqueo / notificación.
@@ -50,6 +53,7 @@ Future<void> main() async {
       searchService: searchService,
       paletteService: paletteService,
       lyricsService: lyricsService,
+      libraryService: libraryService,
     ),
   );
 }
@@ -61,12 +65,14 @@ class GhostMusicApp extends StatelessWidget {
     required this.searchService,
     required this.paletteService,
     required this.lyricsService,
+    this.libraryService,
   });
 
   final AudioPlayerService audioService;
   final SearchService searchService;
   final PaletteService paletteService;
   final LyricsService lyricsService;
+  final LibraryService? libraryService;
 
   @override
   Widget build(BuildContext context) {
@@ -81,6 +87,7 @@ class GhostMusicApp extends StatelessWidget {
         searchService: searchService,
         paletteService: paletteService,
         lyricsService: lyricsService,
+        libraryService: libraryService ?? LibraryService.instance,
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../../services/audio_player_service.dart';
+import '../../../services/library_service.dart';
 import '../../../services/lyrics_service.dart';
 import '../../../services/palette_service.dart';
 import '../models/lyrics.dart';
@@ -40,11 +41,13 @@ class PlayerViewModel extends ChangeNotifier {
     required AudioPlayerService audioService,
     PaletteService? paletteService,
     LyricsService? lyricsService,
+    LibraryService? libraryService,
     required List<Track> queue,
     int initialIndex = 0,
   })  : _audio = audioService,
         _palettes = paletteService ?? PaletteService(),
         _lyricsService = lyricsService ?? LyricsService(),
+        _libraryService = libraryService ?? LibraryService.instance,
         _queue = List<Track>.from(queue),
         _currentIndex =
             queue.isEmpty ? 0 : initialIndex.clamp(0, queue.length - 1);
@@ -52,6 +55,7 @@ class PlayerViewModel extends ChangeNotifier {
   final AudioPlayerService _audio;
   final PaletteService _palettes;
   final LyricsService _lyricsService;
+  final LibraryService _libraryService;
   final List<Track> _queue;
   final List<StreamSubscription<dynamic>> _subs = [];
 
@@ -76,6 +80,9 @@ class PlayerViewModel extends ChangeNotifier {
   Lyrics? get lyrics => _lyrics;
   bool get isLoadingLyrics => _isLoadingLyrics;
   String? get error => _error;
+  LibraryService get libraryService => _libraryService;
+  bool get isCurrentTrackFavorite =>
+      _libraryService.isFavorite(currentTrack.id);
 
   Duration get currentPosition => _audio.position;
   Stream<Duration> get positionStream => _audio.positionStream;
@@ -121,6 +128,8 @@ class PlayerViewModel extends ChangeNotifier {
     _isPlaying = _audio.playing;
     _shuffle = _audio.shuffleEnabled;
     _loopMode = _audio.loopMode;
+
+    _libraryService.addListener(_onLibraryChanged);
 
     _subs
       ..add(_audio.playbackStateStream.listen((state) {
@@ -192,7 +201,14 @@ class PlayerViewModel extends ChangeNotifier {
     }
   }
 
+  void _onLibraryChanged() {
+    notifyListeners();
+  }
+
   // ---- Acciones (intents de la vista) ----
+  Future<void> toggleCurrentTrackFavorite() =>
+      _libraryService.toggleFavorite(currentTrack);
+
   void togglePlayPause() => _isPlaying ? _audio.pause() : _audio.play();
 
   void seek(Duration position) => _audio.seek(position);
@@ -210,6 +226,7 @@ class PlayerViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    _libraryService.removeListener(_onLibraryChanged);
     for (final s in _subs) {
       s.cancel();
     }

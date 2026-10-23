@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../library/widgets/add_to_playlist_sheet.dart';
 import '../models/track.dart';
 import '../viewmodels/player_view_model.dart';
 import '../widgets/album_artwork.dart';
@@ -78,38 +79,73 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        // Título + artista (jerarquía tipográfica Apple Music),
-                        // sin el icono antiguo de letras a la derecha.
-                        SizedBox(
-                          width: double.infinity,
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 300),
-                            child: Column(
-                              key: ValueKey(track.id),
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  track.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: text.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: -0.4,
-                                  ),
+                        // Título + artista + acciones de Favorito y Añadir a Playlist.
+                        Row(
+                          children: [
+                            Expanded(
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 300),
+                                child: Column(
+                                  key: ValueKey(track.id),
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      track.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: text.titleLarge?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: -0.4,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      track.artist,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: text.titleMedium?.copyWith(
+                                        color: AppTheme.textSecondary,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  track.artist,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: text.titleMedium?.copyWith(
-                                    color: AppTheme.textSecondary,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
-                          ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              tooltip: _vm.isCurrentTrackFavorite
+                                  ? 'Quitar de favoritos'
+                                  : 'Añadir a favoritos',
+                              onPressed: _vm.toggleCurrentTrackFavorite,
+                              icon: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 220),
+                                transitionBuilder: (child, anim) =>
+                                    ScaleTransition(scale: anim, child: child),
+                                child: Icon(
+                                  _vm.isCurrentTrackFavorite
+                                      ? Icons.favorite_rounded
+                                      : Icons.favorite_border_rounded,
+                                  key: ValueKey(_vm.isCurrentTrackFavorite),
+                                  color: _vm.isCurrentTrackFavorite
+                                      ? AppTheme.accent
+                                      : AppTheme.textSecondary,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Añadir a una playlist',
+                              onPressed: () => AddToPlaylistSheet.show(
+                                context,
+                                libraryService: _vm.libraryService,
+                                track: track,
+                              ),
+                              icon: const Icon(
+                                Icons.playlist_add_rounded,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 16),
                         PlaybackProgressBar(

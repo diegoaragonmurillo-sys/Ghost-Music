@@ -6,15 +6,19 @@ import 'package:material_ui/material_ui.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/duration_formatter.dart';
 import '../../services/audio_player_service.dart';
+import '../../services/library_service.dart';
 import '../../services/lyrics_service.dart';
 import '../../services/palette_service.dart';
 import '../../services/search_service.dart';
+import '../library/views/library_screen.dart';
+import '../library/widgets/add_to_playlist_sheet.dart';
 import '../player/models/track.dart';
 import '../player/viewmodels/player_view_model.dart';
 import '../player/views/player_screen.dart';
 import '../settings/settings_screen.dart';
 
-/// Pantalla principal de búsqueda y exploración musical (estilo Apple Music).
+/// Pantalla raíz con navegación entre Buscar y Biblioteca Local (estilo Apple Music),
+/// manteniendo el MiniPlayer flotando sobre la barra inferior.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
@@ -22,12 +26,14 @@ class HomeScreen extends StatefulWidget {
     required this.searchService,
     required this.paletteService,
     required this.lyricsService,
+    this.libraryService,
   });
 
   final AudioPlayerService audioService;
   final SearchService searchService;
   final PaletteService paletteService;
   final LyricsService lyricsService;
+  final LibraryService? libraryService;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -37,10 +43,14 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _controller = TextEditingController();
   Timer? _debounce;
 
+  int _selectedTabIndex = 0;
   List<Track> _results = const [];
   bool _isSearching = false;
   String? _error;
   int _searchGeneration = 0;
+
+  LibraryService get _library =>
+      widget.libraryService ?? LibraryService.instance;
 
   static const List<String> _quickSuggestions = [
     'The Weeknd Blinding Lights',
@@ -114,6 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
       audioService: widget.audioService,
       paletteService: widget.paletteService,
       lyricsService: widget.lyricsService,
+      libraryService: _library,
       queue: queue,
       initialIndex: index,
     );
@@ -150,92 +161,23 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         bottom: false,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Cabecera con tipografía grande e impactante estilo Apple Music + botón de Ajustes.
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Expanded(
+              child: IndexedStack(
+                index: _selectedTabIndex,
                 children: [
-                  Text(
-                    'Buscar',
-                    style: text.displaySmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -1.0,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Ajustes de Calidad de Audio',
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const SettingsScreen(),
-                        ),
-                      );
-                    },
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFF1C1C22),
-                    ),
-                    icon: const Icon(
-                      Icons.settings_rounded,
-                      color: AppTheme.accent,
-                    ),
+                  _buildSearchTab(text),
+                  LibraryScreen(
+                    libraryService: _library,
+                    audioService: widget.audioService,
+                    paletteService: widget.paletteService,
+                    lyricsService: widget.lyricsService,
                   ),
                 ],
               ),
             ),
 
-            // Barra de búsqueda minimalista.
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: _SearchField(
-                controller: _controller,
-                onChanged: _onQueryChanged,
-                onSubmitted: _performSearch,
-                onClear: () {
-                  _controller.clear();
-                  setState(() => _error = null);
-                },
-              ),
-            ),
-
-            // Chips rápidos de exploración.
-            SizedBox(
-              height: 46,
-              child: ListView.separated(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                scrollDirection: Axis.horizontal,
-                itemCount: _quickSuggestions.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (context, i) {
-                  final label = _quickSuggestions[i];
-                  return ActionChip(
-                    label: Text(label),
-                    backgroundColor: const Color(0xFF1A1A1F),
-                    side: const BorderSide(color: Color(0x22FFFFFF)),
-                    labelStyle: text.labelMedium?.copyWith(
-                      color: AppTheme.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    onPressed: () {
-                      _controller.text = label;
-                      _performSearch(label);
-                    },
-                  );
-                },
-              ),
-            ),
-
-            const SizedBox(height: 4),
-
-            // Lista de resultados.
-            Expanded(
-              child: _buildBody(text),
-            ),
-
-            // Mini-reproductor inferior si ya hay una pista activa en el handler.
+            // Mini-reproductor inferior siempre visible sobre la barra de navegación.
             _MiniPlayerBar(
               audioService: widget.audioService,
               onTap: () {
@@ -250,10 +192,132 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: Color(0x18FFFFFF))),
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _selectedTabIndex,
+          onTap: (idx) {
+            FocusScope.of(context).unfocus();
+            setState(() => _selectedTabIndex = idx);
+          },
+          backgroundColor: const Color(0xF2121216),
+          selectedItemColor: AppTheme.accent,
+          unselectedItemColor: AppTheme.textSecondary,
+          selectedLabelStyle: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.search_rounded),
+              label: 'Buscar',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.library_music_rounded),
+              label: 'Biblioteca',
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildBody(TextTheme text) {
+  Widget _buildSearchTab(TextTheme text) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Cabecera con tipografía grande e impactante estilo Apple Music + botón de Ajustes.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Buscar',
+                style: text.displaySmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -1.0,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Ajustes de Calidad de Audio',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const SettingsScreen(),
+                    ),
+                  );
+                },
+                style: IconButton.styleFrom(
+                  backgroundColor: const Color(0xFF1C1C22),
+                ),
+                icon: const Icon(
+                  Icons.settings_rounded,
+                  color: AppTheme.accent,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Barra de búsqueda minimalista.
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: _SearchField(
+            controller: _controller,
+            onChanged: _onQueryChanged,
+            onSubmitted: _performSearch,
+            onClear: () {
+              _controller.clear();
+              setState(() => _error = null);
+            },
+          ),
+        ),
+
+        // Chips rápidos de exploración.
+        SizedBox(
+          height: 46,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            scrollDirection: Axis.horizontal,
+            itemCount: _quickSuggestions.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final label = _quickSuggestions[i];
+              return ActionChip(
+                label: Text(label),
+                backgroundColor: const Color(0xFF1A1A1F),
+                side: const BorderSide(color: Color(0x22FFFFFF)),
+                labelStyle: text.labelMedium?.copyWith(
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+                onPressed: () {
+                  _controller.text = label;
+                  _performSearch(label);
+                },
+              );
+            },
+          ),
+        ),
+
+        const SizedBox(height: 4),
+
+        // Lista de resultados.
+        Expanded(
+          child: _buildSearchBody(text),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSearchBody(TextTheme text) {
     if (_isSearching) {
       return const Center(
         child: CircularProgressIndicator(
@@ -296,19 +360,32 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-      itemCount: _results.length,
-      separatorBuilder: (_, _) => const Divider(
-        height: 1,
-        indent: 72,
-        color: Color(0x18FFFFFF),
-      ),
-      itemBuilder: (context, index) {
-        final track = _results[index];
-        return _TrackTile(
-          track: track,
-          onTap: () => _openPlayer(queue: _results, index: index),
+    return ListenableBuilder(
+      listenable: _library,
+      builder: (context, _) {
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          itemCount: _results.length,
+          separatorBuilder: (_, _) => const Divider(
+            height: 1,
+            indent: 72,
+            color: Color(0x18FFFFFF),
+          ),
+          itemBuilder: (context, index) {
+            final track = _results[index];
+            final isFav = _library.isFavorite(track.id);
+            return _TrackTile(
+              track: track,
+              isFavorite: isFav,
+              onTap: () => _openPlayer(queue: _results, index: index),
+              onToggleFavorite: () => _library.toggleFavorite(track),
+              onAddToPlaylist: () => AddToPlaylistSheet.show(
+                context,
+                libraryService: _library,
+                track: track,
+              ),
+            );
+          },
         );
       },
     );
@@ -367,10 +444,19 @@ class _SearchField extends StatelessWidget {
 }
 
 class _TrackTile extends StatelessWidget {
-  const _TrackTile({required this.track, required this.onTap});
+  const _TrackTile({
+    required this.track,
+    required this.isFavorite,
+    required this.onTap,
+    required this.onToggleFavorite,
+    required this.onAddToPlaylist,
+  });
 
   final Track track;
+  final bool isFavorite;
   final VoidCallback onTap;
+  final VoidCallback onToggleFavorite;
+  final VoidCallback onAddToPlaylist;
 
   @override
   Widget build(BuildContext context) {
@@ -431,11 +517,26 @@ class _TrackTile extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            const Icon(
-              Icons.play_circle_fill_rounded,
-              color: AppTheme.accent,
-              size: 28,
+            IconButton(
+              tooltip:
+                  isFavorite ? 'Quitar de favoritos' : 'Añadir a favoritos',
+              onPressed: onToggleFavorite,
+              icon: Icon(
+                isFavorite
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                color: isFavorite ? AppTheme.accent : AppTheme.textSecondary,
+                size: 22,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Añadir a una playlist',
+              onPressed: onAddToPlaylist,
+              icon: const Icon(
+                Icons.playlist_add_rounded,
+                color: AppTheme.textSecondary,
+                size: 24,
+              ),
             ),
           ],
         ),
@@ -463,7 +564,7 @@ class _MiniPlayerBar extends StatelessWidget {
 
         final thumbUrl = track.fallbackArtworkUrl ?? track.artworkUrl;
         return Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
             child: BackdropFilter(
