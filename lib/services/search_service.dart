@@ -72,25 +72,29 @@ class SearchService {
     return track.copyWith(audioUrl: await resolveAudioUrl(track.id));
   }
 
-  /// URL directo del stream audio-only de mayor bitrate.
+  /// URL directo del stream audio-only de mayor bitrate en contenedor MP4.
   ///
-  /// Se prioriza el contenedor MP4 (AAC) porque es compatible con AVPlayer
-  /// (iOS) y ExoPlayer (Android); WebM/Opus no se reproduce en iOS.
+  /// Se filtra estrictamente por contenedor `mp4` (AAC) porque `AVPlayer`
+  /// nativo de iOS no soporta contenedores `.webm` (Opus/Vorbis).
   Future<String> resolveAudioUrl(String videoId) async {
     final cached = _streamCache[videoId];
     if (cached != null) return cached;
 
     try {
       final manifest = await _yt.videos.streams.getManifest(videoId);
-      final audio = manifest.audioOnly.toList();
-      if (audio.isEmpty) {
-        throw const SearchException('El vídeo no tiene stream de audio');
+      final mp4Streams = manifest.audioOnly
+          .where((s) => s.container.name == 'mp4')
+          .toList();
+
+      final AudioOnlyStreamInfo? streamInfo =
+          mp4Streams.isEmpty ? null : mp4Streams.withHighestBitrate();
+      if (streamInfo == null) {
+        throw const SearchException(
+          'No se encontró un stream de audio en formato MP4 compatible con iOS',
+        );
       }
-      final mp4 =
-          audio.where((s) => s.container == StreamContainer.mp4).toList();
-      final pool = mp4.isNotEmpty ? mp4 : audio
-        ..sort((a, b) => b.bitrate.compareTo(a.bitrate));
-      return _streamCache[videoId] = pool.first.url.toString();
+
+      return _streamCache[videoId] = streamInfo.url.toString();
     } on SearchException {
       rethrow;
     } catch (e) {
