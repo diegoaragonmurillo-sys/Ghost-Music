@@ -12,6 +12,7 @@ import '../../services/search_service.dart';
 import '../player/models/track.dart';
 import '../player/viewmodels/player_view_model.dart';
 import '../player/views/player_screen.dart';
+import '../settings/settings_screen.dart';
 
 /// Pantalla principal de búsqueda y exploración musical (estilo Apple Music).
 class HomeScreen extends StatefulWidget {
@@ -151,15 +152,37 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Cabecera con tipografía grande e impactante estilo Apple Music.
+            // Cabecera con tipografía grande e impactante estilo Apple Music + botón de Ajustes.
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-              child: Text(
-                'Buscar',
-                style: text.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -1.0,
-                ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Buscar',
+                    style: text.displaySmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -1.0,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Ajustes de Calidad de Audio',
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const SettingsScreen(),
+                        ),
+                      );
+                    },
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0xFF1C1C22),
+                    ),
+                    icon: const Icon(
+                      Icons.settings_rounded,
+                      color: AppTheme.accent,
+                    ),
+                  ),
+                ],
               ),
             ),
 

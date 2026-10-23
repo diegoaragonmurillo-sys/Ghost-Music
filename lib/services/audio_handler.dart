@@ -5,6 +5,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../features/player/models/track.dart';
+import 'audio_router_service.dart';
 import 'search_service.dart';
 
 /// Inicializa el Background Service de audio. Debe llamarse una sola vez
@@ -55,6 +56,16 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
 
   final AudioPlayer player = AudioPlayer();
   SearchService? searchService;
+  AudioRouterService? audioRouter;
+
+  AudioRouterService? get _effectiveRouter {
+    if (audioRouter != null) return audioRouter;
+    final search = searchService;
+    if (search != null) {
+      return audioRouter = AudioRouterService(searchService: search);
+    }
+    return null;
+  }
 
   List<Track> _tracks = const [];
   int _currentIndex = 0;
@@ -159,14 +170,16 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
     _broadcastState(forceLoading: true);
 
     try {
-      // Si el track aún no tiene el URL directo del stream, lo resolvemos con
-      // SearchService obteniendo el manifiesto audioOnly de YouTube.
-      if (!track.isResolved) {
-        final resolver = searchService;
-        if (resolver == null) {
-          throw StateError('SearchService no configurado en GhostAudioHandler');
-        }
-        track = await resolver.resolveStream(track);
+      // Resuelve el stream a través del AudioRouterService aplicando
+      // la preferencia de calidad actual y el fallback en cascada.
+      final router = _effectiveRouter;
+      if (router == null && !track.isResolved) {
+        throw StateError(
+          'AudioRouterService no configurado en GhostAudioHandler',
+        );
+      }
+      if (router != null) {
+        track = await router.resolveStream(track);
         if (token != _loadToken) return;
         _tracks[index] = track;
         if (index < items.length) {
@@ -212,14 +225,14 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
   }
 
   void _prefetchNext(int nextIndex) {
-    final resolver = searchService;
-    if (resolver == null || nextIndex < 0 || nextIndex >= _tracks.length) {
+    final router = _effectiveRouter;
+    if (router == null || nextIndex < 0 || nextIndex >= _tracks.length) {
       return;
     }
     final next = _tracks[nextIndex];
     if (next.isResolved) return;
     unawaited(
-      resolver.resolveStream(next).then((resolved) {
+      router.resolveStream(next).then((resolved) {
         if (nextIndex < _tracks.length && _tracks[nextIndex].id == resolved.id) {
           _tracks[nextIndex] = resolved;
         }

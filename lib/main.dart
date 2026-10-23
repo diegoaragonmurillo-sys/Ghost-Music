@@ -1,16 +1,21 @@
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'core/settings_manager.dart';
 import 'core/theme/app_theme.dart';
 import 'features/home/home_screen.dart';
 import 'services/audio_handler.dart';
 import 'services/audio_player_service.dart';
+import 'services/audio_router_service.dart';
 import 'services/lyrics_service.dart';
 import 'services/palette_service.dart';
 import 'services/search_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Inicializa las preferencias persistentes del usuario (Calidad de Audio).
+  await SettingsManager.instance.init();
 
   // Barra de estado clara sobre el fondo oscuro e inmersivo.
   SystemChrome.setSystemUIOverlayStyle(
@@ -23,6 +28,10 @@ Future<void> main() async {
 
   // Servicios compartidos de la arquitectura híbrida.
   final searchService = SearchService();
+  final audioRouter = AudioRouterService(
+    searchService: searchService,
+    settingsManager: SettingsManager.instance,
+  );
   final paletteService = PaletteService();
   final lyricsService = LyricsService();
 
@@ -32,6 +41,7 @@ Future<void> main() async {
   final audioService = AudioPlayerService(
     audioHandler,
     searchService: searchService,
+    audioRouter: audioRouter,
   );
 
   runApp(

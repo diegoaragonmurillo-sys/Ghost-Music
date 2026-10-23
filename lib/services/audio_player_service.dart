@@ -1,8 +1,10 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../core/settings_manager.dart';
 import '../features/player/models/track.dart';
 import 'audio_handler.dart';
+import 'audio_router_service.dart';
 import 'search_service.dart';
 
 /// Fachada que consume el ViewModel.
@@ -11,13 +13,23 @@ import 'search_service.dart';
 ///   la UI y la pantalla de bloqueo comparten exactamente el mismo flujo.
 /// - **Streams** → se leen del motor `just_audio` y del handler subyacente.
 class AudioPlayerService {
-  AudioPlayerService(this._handler, {SearchService? searchService}) {
+  AudioPlayerService(
+    this._handler, {
+    SearchService? searchService,
+    AudioRouterService? audioRouter,
+  }) {
     if (searchService != null) {
       _handler.searchService = searchService;
+    }
+    if (audioRouter != null) {
+      _handler.audioRouter = audioRouter;
+    } else if (searchService != null) {
+      _handler.audioRouter = AudioRouterService(searchService: searchService);
     }
   }
 
   final GhostAudioHandler _handler;
+  AudioQuality? _lastLoadedQuality;
   AudioPlayer get _player => _handler.player;
 
   Stream<PlayerState> get playerStateStream => _player.playerStateStream;
@@ -51,8 +63,10 @@ class AudioPlayerService {
     final loadedIds = _handler.currentTracks.map((t) => t.id).toList();
     final newIds = tracks.map((t) => t.id).toList();
 
+    final selectedQuality = SettingsManager.instance.audioQuality;
     if (current != null &&
         current.id == target.id &&
+        _lastLoadedQuality == selectedQuality &&
         _listEquals(loadedIds, newIds) &&
         _player.processingState != ProcessingState.idle) {
       if (autoPlay && !_player.playing) {
@@ -61,6 +75,7 @@ class AudioPlayerService {
       return;
     }
 
+    _lastLoadedQuality = selectedQuality;
     await _handler.loadTracks(
       tracks,
       initialIndex: initialIndex,
