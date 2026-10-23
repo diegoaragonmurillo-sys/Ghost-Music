@@ -43,6 +43,7 @@ dependencies:
   youtube_explode_dart: ^3.1.0
   http: ^1.6.0
   shared_preferences: ^2.5.6
+  scrollable_positioned_list: ^0.3.8
 
 dev_dependencies:
   flutter_test:

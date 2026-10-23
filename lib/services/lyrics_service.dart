@@ -19,6 +19,39 @@ class LyricsService {
         'GhostMusic/1.0.0 (https://github.com/diegoaragonmurillo-sys/Ghost-Music)',
   };
 
+  /// Expresión regular estricta para capturar minutos, segundos, milisegundos (2 o 3 dígitos) y texto.
+  static final RegExp _lrcRegex = RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)');
+
+  /// Convierte un texto LRC (`[01:15.22] Texto`) en una lista de [LyricLine]
+  /// con precisión de milisegundos, conservando pausas instrumentales vacías.
+  List<LyricLine> parseLrc(String syncedLyrics) {
+    final lines = <LyricLine>[];
+    for (final rawLine in syncedLyrics.split('\n')) {
+      final match = _lrcRegex.firstMatch(rawLine.trim());
+      if (match == null) continue;
+
+      final minutes = int.parse(match.group(1)!);
+      final seconds = int.parse(match.group(2)!);
+      final msStr = match.group(3)!;
+      final milliseconds =
+          msStr.length == 2 ? int.parse(msStr) * 10 : int.parse(msStr);
+      final text = (match.group(4) ?? '').trim();
+
+      lines.add(
+        LyricLine(
+          Duration(
+            minutes: minutes,
+            seconds: seconds,
+            milliseconds: milliseconds,
+          ),
+          text,
+        ),
+      );
+    }
+    lines.sort((a, b) => a.time.compareTo(b.time));
+    return lines;
+  }
+
   /// Obtiene y parsea las letras sincronizadas (LRC) para [trackName] y [artistName].
   Future<List<LyricLine>> fetchSyncedLyrics({
     required String trackName,
@@ -74,9 +107,9 @@ class LyricsService {
     for (final item in list) {
       final synced = item['syncedLyrics'] as String?;
       if (synced != null && synced.trim().isNotEmpty) {
-        final parsed = Lyrics.parse(synced: synced);
-        if (parsed != null && parsed.lines.isNotEmpty) {
-          return parsed;
+        final parsedLines = parseLrc(synced);
+        if (parsedLines.isNotEmpty) {
+          return Lyrics(lines: parsedLines, isSynced: true);
         }
       }
     }
@@ -88,9 +121,6 @@ class LyricsService {
       plain: first['plainLyrics'] as String?,
     );
   }
-
-  /// Convierte un texto LRC (`[01:15.22] Texto`) directamente en `List<LyricLine>`.
-  List<LyricLine> parseLrc(String syncedLyrics) => Lyrics.parseLrc(syncedLyrics);
 
   static String _cleanForLookup(String title) => title
       .replaceAll(RegExp(r'\s*[\(\[].*?[\)\]]'), '')

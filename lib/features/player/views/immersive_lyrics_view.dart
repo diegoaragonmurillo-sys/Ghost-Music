@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../services/palette_service.dart';
@@ -9,7 +10,9 @@ import '../models/lyrics.dart';
 import '../models/track.dart';
 import '../viewmodels/player_view_model.dart';
 
-/// Vista inmersiva de letras reales sincronizadas (LRCLIB) a pantalla completa.
+/// Vista inmersiva de letras reales sincronizadas (LRCLIB) a pantalla completa
+/// con motor de reloj a 60FPS (ticks de 50ms), lookahead predictivo de 250ms
+/// y `ScrollablePositionedList`.
 class ImmersiveLyricsView extends StatefulWidget {
   const ImmersiveLyricsView({
     super.key,
@@ -38,24 +41,42 @@ class ImmersiveLyricsView extends StatefulWidget {
 }
 
 class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
-  final ScrollController _scrollController = ScrollController();
-  final GlobalKey _listViewKey = GlobalKey();
+  static const Duration _tickInterval = Duration(milliseconds: 50);
+  static const Duration _lookaheadOffset = Duration(milliseconds: 250);
 
+  final ItemScrollController _itemScrollController = ItemScrollController();
+  final ItemPositionsListener _itemPositionsListener =
+      ItemPositionsListener.create();
+
+  StreamSubscription<int>? _tickSub;
   StreamSubscription<Duration>? _positionSub;
-  List<GlobalKey> _itemKeys = const [];
+
+  /// Índice de la línea activa actual (deduplicado para evitar scrolls redundantes).
+  int _currentIndex = 0;
+
+  /// Offset manual en milisegundos para compensar canciones con intros largos.
+  int manualOffsetMs = 0;
+
+  Duration _latestStreamPosition = Duration.zero;
   String? _currentTrackId;
-  int _activeIndex = -1;
-  Duration _currentPosition = Duration.zero;
-  double _viewportHeight = 0;
 
   PlayerViewModel get _vm => widget.viewModel;
 
   @override
   void initState() {
     super.initState();
+    _currentTrackId = _vm.currentTrack.id;
+    _latestStreamPosition = _vm.currentPosition;
     _vm.addListener(_onViewModelChanged);
-    _syncItemKeys();
-    _positionSub = _vm.positionStream.listen(_onPositionChanged);
+
+    // Escucha el stream nativo y lo combina con un reloj de alta frecuencia (50ms).
+    _positionSub = _vm.positionStream.listen((pos) {
+      _latestStreamPosition = pos;
+    });
+
+    _tickSub = Stream<int>.periodic(_tickInterval, (tick) => tick).listen((_) {
+      _onTick();
+    });
   }
 
   @override
@@ -65,142 +86,88 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
       oldWidget.viewModel.removeListener(_onViewModelChanged);
       _positionSub?.cancel();
       _vm.addListener(_onViewModelChanged);
-      _syncItemKeys();
-      _positionSub = _vm.positionStream.listen(_onPositionChanged);
+      _latestStreamPosition = _vm.currentPosition;
+      _positionSub = _vm.positionStream.listen((pos) {
+        _latestStreamPosition = pos;
+      });
     }
   }
 
   @override
   void dispose() {
     _vm.removeListener(_onViewModelChanged);
+    _tickSub?.cancel();
     _positionSub?.cancel();
-    _scrollController.dispose();
     super.dispose();
   }
 
   void _onViewModelChanged() {
     if (!mounted) return;
-    _syncItemKeys();
+    final trackId = _vm.currentTrack.id;
+    if (_currentTrackId != trackId) {
+      _currentTrackId = trackId;
+      _currentIndex = 0;
+    }
     setState(() {});
   }
 
-  void _syncItemKeys() {
-    final trackId = _vm.currentTrack.id;
-    final lines = _vm.lyrics?.lines ?? const <LyricLine>[];
-
-    if (_currentTrackId != trackId || _itemKeys.length != lines.length) {
-      _currentTrackId = trackId;
-      _itemKeys = List.generate(lines.length, (_) => GlobalKey());
-      _activeIndex = -1;
-      _updateActiveLine(_currentPosition, forceScroll: true);
-    }
-  }
-
-  void _onPositionChanged(Duration position) {
+  /// Motor de reloj de 50ms con Lookahead (-250ms sobre el umbral de la línea)
+  /// y soporte para [manualOffsetMs].
+  void _onTick() {
     if (!mounted) return;
-    _currentPosition = position;
-    _updateActiveLine(position);
-  }
-
-  void _updateActiveLine(Duration position, {bool forceScroll = false}) {
     final lyrics = _vm.lyrics;
-    if (lyrics == null || lyrics.lines.isEmpty) return;
+    if (lyrics == null || !lyrics.isSynced || lyrics.lines.isEmpty) return;
 
-    final newIndex = _findActiveIndex(position, lyrics);
-    if (newIndex != _activeIndex || forceScroll) {
+    // Combina la posición directa del motor de audio con el último valor del stream.
+    final livePosition = _vm.currentPosition;
+    final basePosition = livePosition > Duration.zero
+        ? livePosition
+        : _latestStreamPosition;
+
+    // Suma el offset manual global antes de calcular el índice.
+    final positionWithManualOffset =
+        basePosition + Duration(milliseconds: manualOffsetMs);
+
+    final newIndex = _computeActiveIndex(
+      positionWithManualOffset,
+      lyrics.lines,
+    );
+
+    if (newIndex != _currentIndex) {
       setState(() {
-        _activeIndex = newIndex;
+        _currentIndex = newIndex;
       });
-      if (newIndex >= 0 && lyrics.isSynced) {
-        _scrollToCenter(newIndex);
-      }
+      _scrollToActiveIndex(newIndex);
     }
   }
 
-  int _findActiveIndex(Duration position, Lyrics lyrics) {
-    if (!lyrics.isSynced || lyrics.lines.isEmpty) return -1;
-    if (position < lyrics.lines.first.time) return 0;
+  /// Calcula la línea activa aplicando el lookahead de 250ms para anticipar
+  /// la animación visual antes de que el artista cante la frase.
+  int _computeActiveIndex(Duration audioPosition, List<LyricLine> lines) {
+    if (lines.isEmpty) return 0;
 
-    var active = 0;
-    for (var i = 0; i < lyrics.lines.length; i++) {
-      if (position >= lyrics.lines[i].time) {
-        active = i;
+    var candidate = 0;
+    for (var i = 0; i < lines.length; i++) {
+      // Se resta 250ms al timestamp de la línea para que la animación de UI
+      // arranque un instante antes de que se cante.
+      final triggerTime = lines[i].time - _lookaheadOffset;
+      if (audioPosition >= triggerTime) {
+        candidate = i;
       } else {
         break;
       }
     }
-    return active;
+    return candidate;
   }
 
-  void _scrollToCenter(int index) {
-    if (index < 0 || index >= _itemKeys.length) return;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-
-      final itemContext = _itemKeys[index].currentContext;
-      final listContext = _listViewKey.currentContext;
-
-      if (itemContext != null && listContext != null) {
-        final itemBox = itemContext.findRenderObject() as RenderBox?;
-        final listBox = listContext.findRenderObject() as RenderBox?;
-        if (itemBox != null && listBox != null && itemBox.hasSize) {
-          final offsetInViewport =
-              itemBox.localToGlobal(Offset.zero, ancestor: listBox);
-          final itemCenter = offsetInViewport.dy + (itemBox.size.height / 2);
-          final viewportCenter = listBox.size.height / 2;
-          final delta = itemCenter - viewportCenter;
-          final targetOffset = (_scrollController.offset + delta).clamp(
-            0.0,
-            _scrollController.position.maxScrollExtent,
-          );
-
-          _scrollController.animateTo(
-            targetOffset,
-            duration: const Duration(milliseconds: 550),
-            curve: Curves.easeOutCubic,
-          );
-          return;
-        }
-      }
-
-      // Si el elemento aún está fuera del área renderizada, estimamos su
-      // posición media y luego afinamos el centrado cuando entre en pantalla.
-      const estimatedItemExtent = 78.0;
-      final approxOffset = (index * estimatedItemExtent).clamp(
-        0.0,
-        _scrollController.position.maxScrollExtent,
-      );
-      _scrollController
-          .animateTo(
-            approxOffset,
-            duration: const Duration(milliseconds: 450),
-            curve: Curves.easeOutCubic,
-          )
-          .then((_) {
-        if (!mounted || !_scrollController.hasClients) return;
-        final ctx = _itemKeys[index].currentContext;
-        final lCtx = _listViewKey.currentContext;
-        if (ctx != null && lCtx != null && ctx.mounted && lCtx.mounted) {
-          final iBox = ctx.findRenderObject() as RenderBox?;
-          final lBox = lCtx.findRenderObject() as RenderBox?;
-          if (iBox != null && lBox != null && iBox.hasSize) {
-            final off = iBox.localToGlobal(Offset.zero, ancestor: lBox);
-            final delta =
-                (off.dy + iBox.size.height / 2) - (lBox.size.height / 2);
-            final refined = (_scrollController.offset + delta).clamp(
-              0.0,
-              _scrollController.position.maxScrollExtent,
-            );
-            _scrollController.animateTo(
-              refined,
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOut,
-            );
-          }
-        }
-      });
-    });
+  void _scrollToActiveIndex(int index) {
+    if (!_itemScrollController.isAttached) return;
+    _itemScrollController.scrollTo(
+      index: index,
+      alignment: 0.5,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   @override
@@ -216,9 +183,7 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
         body: Stack(
           fit: StackFit.expand,
           children: [
-            // Fondo continuo a pantalla completa sin cortes horizontales.
             _ContinuousGradientBackground(palette: palette),
-
             SafeArea(
               child: Column(
                 children: [
@@ -294,14 +259,7 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final newHeight = constraints.maxHeight;
-        if ((_viewportHeight - newHeight).abs() > 1.0) {
-          _viewportHeight = newHeight;
-          if (_activeIndex >= 0 && lyrics.isSynced) {
-            _scrollToCenter(_activeIndex);
-          }
-        }
-        final symmetricPadding = _viewportHeight * 0.44;
+        final verticalPadding = constraints.maxHeight * 0.45;
 
         return ShaderMask(
           shaderCallback: (rect) {
@@ -318,26 +276,31 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
             ).createShader(rect);
           },
           blendMode: BlendMode.dstIn,
-          child: ListView.builder(
-            key: _listViewKey,
-            controller: _scrollController,
+          child: ScrollablePositionedList.builder(
+            itemScrollController: _itemScrollController,
+            itemPositionsListener: _itemPositionsListener,
             physics: const BouncingScrollPhysics(),
             padding: EdgeInsets.symmetric(
               horizontal: 28,
-              vertical: symmetricPadding,
+              vertical: verticalPadding,
             ),
             itemCount: lines.length,
             itemBuilder: (context, index) {
               final line = lines[index];
-              final isActive = !lyrics.isSynced || index == _activeIndex;
+              final isActive = !lyrics.isSynced || index == _currentIndex;
 
-              return KeyedSubtree(
-                key: _itemKeys[index],
-                child: _ImmersiveLyricItem(
-                  line: line,
-                  isActive: isActive,
-                  onTap: lyrics.isSynced ? () => _vm.seek(line.time) : null,
-                ),
+              return _ImmersiveLyricItem(
+                line: line,
+                isActive: isActive,
+                onTap: lyrics.isSynced
+                    ? () {
+                        setState(() {
+                          _currentIndex = index;
+                        });
+                        _vm.seek(line.time);
+                        _scrollToActiveIndex(index);
+                      }
+                    : null,
               );
             },
           ),
@@ -495,8 +458,8 @@ class _ImmersiveTrackHeader extends StatelessWidget {
   }
 }
 
-/// Línea de letra con estilo activo (blanco puro, 26px, negrita) e inactivo
-/// (50% opacidad y ligeramente atenuado).
+/// Línea de letra con soporte para pausas instrumentales vacías y estilo
+/// activo (blanco puro, 26px, negrita) vs inactivo (50% opacidad, atenuado).
 class _ImmersiveLyricItem extends StatelessWidget {
   const _ImmersiveLyricItem({
     required this.line,
@@ -511,16 +474,19 @@ class _ImmersiveLyricItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final targetBlur = isActive ? 0.0 : 1.2;
+    final isInstrumentalBreak = line.text.isEmpty;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
+        padding: EdgeInsets.symmetric(
+          vertical: isInstrumentalBreak ? 18 : 14,
+        ),
         child: TweenAnimationBuilder<double>(
           tween: Tween<double>(begin: targetBlur, end: targetBlur),
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
           builder: (context, sigma, child) {
             return ImageFiltered(
               imageFilter: ImageFilter.blur(
@@ -533,11 +499,11 @@ class _ImmersiveLyricItem extends StatelessWidget {
           child: AnimatedScale(
             scale: isActive ? 1.0 : 0.95,
             alignment: Alignment.centerLeft,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
             child: AnimatedDefaultTextStyle(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOut,
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
               style: TextStyle(
                 fontSize: isActive ? 26 : 21,
                 fontWeight: isActive ? FontWeight.bold : FontWeight.w600,
@@ -556,7 +522,20 @@ class _ImmersiveLyricItem extends StatelessWidget {
                       ]
                     : const [],
               ),
-              child: Text(line.text),
+              child: isInstrumentalBreak
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.more_horiz_rounded,
+                          size: isActive ? 32 : 24,
+                          color: isActive
+                              ? Colors.white
+                              : Colors.white.withValues(alpha: 0.40),
+                        ),
+                      ],
+                    )
+                  : Text(line.text),
             ),
           ),
         ),

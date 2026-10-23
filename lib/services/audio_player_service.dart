@@ -44,6 +44,7 @@ class AudioPlayerService {
   Stream<LoopMode> get loopModeStream => _player.loopModeStream;
 
   bool get playing => _player.playing;
+  Duration get position => _player.position;
   int get currentIndex => _handler.currentTrackIndex;
   Track? get currentTrack => _handler.currentTrack;
   List<Track> get currentQueue => _handler.currentTracks;

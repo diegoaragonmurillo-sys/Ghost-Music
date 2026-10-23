@@ -15,27 +15,35 @@ class Lyrics {
   /// `true` si cada línea tiene timestamp real (karaoke estilo Apple Music).
   final bool isSynced;
 
-  static final _timestamp = RegExp(r'\[(\d{1,2}):(\d{1,2}(?:[.:]\d{1,3})?)\]');
+  static final RegExp lrcLineRegex =
+      RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)');
 
   /// Convierte una cadena en formato LRC (`[01:15.22] Texto`) en una lista
-  /// ordenada de [LyricLine] con precisión de milisegundos.
+  /// ordenada de [LyricLine] con precisión de milisegundos, conservando las
+  /// líneas vacías (pausas instrumentales).
   static List<LyricLine> parseLrc(String rawLrc) {
     final lines = <LyricLine>[];
     for (final raw in rawLrc.split('\n')) {
-      final matches = _timestamp.allMatches(raw).toList();
-      if (matches.isEmpty) continue;
-      final text = raw.substring(matches.last.end).trim();
-      if (text.isEmpty) continue;
-      for (final m in matches) {
-        final minutes = int.parse(m.group(1)!);
-        final seconds = double.parse(m.group(2)!.replaceAll(':', '.'));
-        lines.add(
-          LyricLine(
-            Duration(milliseconds: ((minutes * 60 + seconds) * 1000).round()),
-            text,
+      final match = lrcLineRegex.firstMatch(raw.trim());
+      if (match == null) continue;
+
+      final minutes = int.parse(match.group(1)!);
+      final seconds = int.parse(match.group(2)!);
+      final msGroup = match.group(3)!;
+      final milliseconds =
+          msGroup.length == 2 ? int.parse(msGroup) * 10 : int.parse(msGroup);
+      final text = (match.group(4) ?? '').trim();
+
+      lines.add(
+        LyricLine(
+          Duration(
+            minutes: minutes,
+            seconds: seconds,
+            milliseconds: milliseconds,
           ),
-        );
-      }
+          text,
+        ),
+      );
     }
     lines.sort((a, b) => a.time.compareTo(b.time));
     return lines;
@@ -50,9 +58,7 @@ class Lyrics {
     if (plain != null && plain.trim().isNotEmpty) {
       final plainLines = plain
           .split('\n')
-          .map((l) => l.trim())
-          .where((l) => l.isNotEmpty)
-          .map((l) => LyricLine(Duration.zero, l))
+          .map((l) => LyricLine(Duration.zero, l.trim()))
           .toList();
       if (plainLines.isNotEmpty) {
         return Lyrics(lines: plainLines, isSynced: false);

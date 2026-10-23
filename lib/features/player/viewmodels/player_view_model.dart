@@ -77,6 +77,7 @@ class PlayerViewModel extends ChangeNotifier {
   bool get isLoadingLyrics => _isLoadingLyrics;
   String? get error => _error;
 
+  Duration get currentPosition => _audio.position;
   Stream<Duration> get positionStream => _audio.positionStream;
 
   Stream<ProgressState> get progressStream {
