@@ -127,6 +127,13 @@ class LyricsService {
     final cleanTrack = _cleanForLookup(trackName);
     final cleanArtist = _cleanArtist(artistName);
 
+    // 1. Intento prioritario en /api/get
+    final exact = await _getExact(cleanTrack, cleanArtist, targetDuration);
+    if (exact != null && exact.lines.isNotEmpty) {
+      return exact.lines;
+    }
+
+    // 2. Fallback a búsqueda
     final lyrics = await _search(
           {
             'track_name': cleanTrack,
@@ -141,6 +148,46 @@ class LyricsService {
 
     if (lyrics == null) return const [];
     return lyrics.lines;
+  }
+
+  /// Consulta el endpoint de coincidencia exacta de LRCLIB (/api/get).
+  Future<Lyrics?> _getExact(
+    String trackName,
+    String artistName,
+    Duration? duration,
+  ) async {
+    if (trackName.isEmpty || artistName.isEmpty) return null;
+    try {
+      final queryParams = <String, String>{
+        'track_name': trackName,
+        'artist_name': artistName,
+        if (duration != null && duration.inSeconds > 0)
+          'duration': duration.inSeconds.toString(),
+      };
+      final uri = Uri.https(_host, '/api/get', queryParams);
+      final res = await _http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode != 200) return null;
+
+      final decoded = jsonDecode(res.body);
+      if (decoded is! Map<String, dynamic>) return null;
+
+      final synced = decoded['syncedLyrics'] as String?;
+      if (synced != null && synced.trim().isNotEmpty) {
+        final parsed = parseLrc(synced);
+        if (parsed.isNotEmpty) {
+          return Lyrics(
+            lines: parsed,
+            isSynced: true,
+            suggestedOffsetMs: 0,
+          );
+        }
+      }
+    } catch (_) {
+      return null;
+    }
+    return null;
   }
 
   /// Obtiene el objeto [Lyrics] para un [Track] con Nivel 0 y caché en memoria.
@@ -168,15 +215,19 @@ class LyricsService {
     final artist = _cleanArtist(track.artist);
     Lyrics? lyrics;
     try {
-      // 1. Petición GET a https://lrclib.net/api/search pasando track_name, artist_name y targetDuration.
-      lyrics = await _search(
+      // 1. Prioridad: Coincidencia exacta con duración en /api/get
+      lyrics = await _getExact(title, artist, track.duration);
+
+      // 2. Si no hubo coincidencia exacta en /api/get, recurrir a /api/search
+      lyrics ??= await _search(
         {
           'track_name': title,
           'artist_name': artist,
         },
         targetDuration: track.duration,
       );
-      // 2. Fallback por consulta general si los metadatos de YouTube varían.
+
+      // 3. Fallback por consulta general si los metadatos de YouTube varían
       lyrics ??= await _search(
         {'q': '$title $artist'},
         targetDuration: track.duration,
@@ -242,16 +293,21 @@ class LyricsService {
       final lrcDurationSec = (chosenItem['duration'] as num?)?.toDouble();
       var suggestedOffsetMs = 0;
 
-      // Compensación inteligente: si hay una diferencia notable de duración
-      // (ej. videoclip con intro hablada de 26s respecto a la versión de estudio,
-      // deltaMs será negativo (-26000ms) para retrasar el disparo de las letras).
+      // Compensación inteligente: solo admisible cuando el audio de YouTube
+      // es MÁS LARGO que la versión de estudio (deltaMs < 0), lo que indica
+      // una intro hablada o cinemática de videoclip (-3s a -60s).
+      // Si deltaMs > 0 (la versión de YouTube es más corta que la de LRCLIB,
+      // ej. LRCLIB incluye outro/diálogo largo), suggestedOffsetMs DEBE SER 0.
+      // Si la diferencia absoluta supera los 60 segundos, descartar la sugerencia (0).
       if (targetDuration != null &&
           lrcDurationSec != null &&
           lrcDurationSec > 0) {
         final deltaMs =
             (lrcDurationSec * 1000).round() - targetDuration.inMilliseconds;
-        if (deltaMs.abs() >= 3000 && deltaMs.abs() <= 60000) {
+        if (deltaMs <= -3000 && deltaMs >= -60000) {
           suggestedOffsetMs = deltaMs;
+        } else {
+          suggestedOffsetMs = 0;
         }
       }
 

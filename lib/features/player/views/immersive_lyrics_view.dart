@@ -67,9 +67,6 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
   /// Indica si el usuario tiene un offset manual guardado en SharedPreferences.
   bool _hasSavedManualOffset = false;
 
-  /// Referencia a las últimas letras aplicadas para detectar carga asíncrona.
-  Lyrics? _lastAppliedLyrics;
-
   /// Panel de ajuste fino de sincronización visible/oculto.
   bool _showSyncPanel = false;
 
@@ -147,10 +144,7 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
     if (!mounted || _currentTrackId != trackId) return;
     setState(() {
       _hasSavedManualOffset = saved != 0;
-      manualOffsetMs = saved != 0
-          ? saved
-          : (_vm.lyrics?.suggestedOffsetMs ?? 0);
-      _lastAppliedLyrics = _vm.lyrics;
+      manualOffsetMs = saved;
     });
   }
 
@@ -169,15 +163,9 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
       _currentTrackId = trackId;
       _currentIndex = -1;
       _hasSavedManualOffset = false;
-      _lastAppliedLyrics = null;
       _anchorPosition = _vm.currentPosition;
       _interpolatedWatch.reset();
       _loadPersistedOffset(trackId);
-    } else if (_vm.lyrics != null && _vm.lyrics != _lastAppliedLyrics) {
-      _lastAppliedLyrics = _vm.lyrics;
-      if (!_hasSavedManualOffset && manualOffsetMs == 0) {
-        manualOffsetMs = _vm.lyrics!.suggestedOffsetMs;
-      }
     }
 
     if (_vm.isPlaying) {
@@ -220,11 +208,16 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
     );
 
     if (newIndex != _currentIndex) {
+      final prevIndex = _currentIndex;
       setState(() {
         _currentIndex = newIndex;
       });
-      if (!_isUserScrolling && newIndex >= 0) {
-        _scrollToActiveIndex(newIndex);
+      if (!_isUserScrolling) {
+        if (newIndex >= 0) {
+          _scrollToActiveIndex(newIndex);
+        } else if (prevIndex >= 0) {
+          _scrollToActiveIndex(0);
+        }
       }
     } else {
       // Si estamos en la intro instrumental, forzar redibujado sutil de la barra
@@ -240,6 +233,19 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
   /// Retorna -1 si aún no comienza la primera línea (estado de intro instrumental).
   int _computeActiveIndex(Duration audioPosition, List<LyricLine> lines) {
     if (lines.isEmpty) return -1;
+
+    // Guardrail "Intro Instrumental Lock":
+    // Si la pista tiene intro instrumental (> 3s), evaluamos la posición real del reproductor.
+    // Si la posición real aún no alcanza la primera línea (menos margen de 300ms)
+    // y el usuario NO tiene un offset guardado conscientemente, forzar retorno -1.
+    if (lines.first.time > const Duration(seconds: 3)) {
+      final rawPosition = _getEffectivePosition();
+      if (rawPosition < lines.first.time - const Duration(milliseconds: 300) &&
+          !_hasSavedManualOffset) {
+        return -1;
+      }
+    }
+
     final firstTrigger = lines.first.time - _lookaheadOffset;
     if (audioPosition < firstTrigger) return -1;
 
