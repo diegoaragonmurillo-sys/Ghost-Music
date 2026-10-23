@@ -1,5 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ghost_music/features/player/models/track.dart';
+import 'package:ghost_music/services/audio_handler.dart';
 import 'package:ghost_music/services/library_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -104,6 +107,28 @@ void main() {
       // 6. Borrar la playlist completa.
       await reloaded.deletePlaylist(playlist.id);
       expect(reloaded.playlists, isEmpty);
+    },
+  );
+
+  test(
+    'GhostAudioHandler.pickNextShuffleIndex elige índices aleatorios distintos de currentIndex',
+    () {
+      expect(GhostAudioHandler.pickNextShuffleIndex(0, 1), 0);
+
+      final rng = math.Random(42);
+      const length = 5;
+      for (var current = 0; current < length; current++) {
+        final seen = <int>{};
+        for (var i = 0; i < 40; i++) {
+          final next =
+              GhostAudioHandler.pickNextShuffleIndex(current, length, rng);
+          expect(next, inInclusiveRange(0, length - 1));
+          expect(next, isNot(equals(current)));
+          seen.add(next);
+        }
+        // Con 40 muestras sobre 4 opciones posibles, debe cubrir varios índices distintos.
+        expect(seen.length, greaterThan(1));
+      }
     },
   );
 }

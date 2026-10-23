@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -9,6 +11,7 @@ import '../../player/models/track.dart';
 import '../../player/viewmodels/player_view_model.dart';
 import '../../player/views/player_screen.dart';
 import '../models/playlist.dart';
+import '../widgets/add_to_playlist_sheet.dart';
 import 'playlist_detail_screen.dart';
 
 /// Pantalla de Biblioteca Local (Favoritos y Playlists) con estética Apple Music.
@@ -34,6 +37,8 @@ class LibraryScreen extends StatelessWidget {
   }) {
     if (queue.isEmpty) return;
     audioService.setShuffle(shuffle);
+    final startIndex =
+        shuffle ? math.Random().nextInt(queue.length) : index;
 
     final vm = PlayerViewModel(
       audioService: audioService,
@@ -41,7 +46,7 @@ class LibraryScreen extends StatelessWidget {
       lyricsService: lyricsService,
       libraryService: libraryService,
       queue: queue,
-      initialIndex: index,
+      initialIndex: startIndex,
     );
 
     Navigator.of(context).push(
@@ -88,57 +93,12 @@ class LibraryScreen extends StatelessWidget {
   }
 
   Future<void> _promptCreatePlaylist(BuildContext context) async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1C1C22),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: const Text(
-            'Nueva Playlist',
-            style: TextStyle(fontWeight: FontWeight.w700),
-          ),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            onSubmitted: (val) => Navigator.of(dialogContext).pop(val),
-            decoration: InputDecoration(
-              hintText: 'Nombre de la playlist',
-              hintStyle: const TextStyle(color: Color(0x80FFFFFF)),
-              filled: true,
-              fillColor: const Color(0xFF121216),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text(
-                'Cancelar',
-                style: TextStyle(color: AppTheme.textSecondary),
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-              child: const Text(
-                'Crear',
-                style: TextStyle(
-                  color: AppTheme.accent,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+    final name = await PlaylistNameDialog.show(
+      context,
+      title: 'Nueva Playlist',
+      hintText: 'Nombre de la playlist',
+      confirmLabel: 'Crear',
     );
-    controller.dispose();
 
     final trimmed = name?.trim() ?? '';
     if (trimmed.isNotEmpty) {

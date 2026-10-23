@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -39,6 +41,8 @@ class PlaylistDetailScreen extends StatelessWidget {
   }) {
     if (queue.isEmpty) return;
     audioService.setShuffle(shuffle);
+    final startIndex =
+        shuffle ? math.Random().nextInt(queue.length) : index;
 
     final vm = PlayerViewModel(
       audioService: audioService,
@@ -46,7 +50,7 @@ class PlaylistDetailScreen extends StatelessWidget {
       lyricsService: lyricsService,
       libraryService: libraryService,
       queue: queue,
-      initialIndex: index,
+      initialIndex: startIndex,
     );
 
     Navigator.of(context).push(
@@ -78,56 +82,13 @@ class PlaylistDetailScreen extends StatelessWidget {
     String id,
     String currentName,
   ) async {
-    final controller = TextEditingController(text: currentName);
-    final newName = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1C1C22),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: const Text(
-            'Renombrar Playlist',
-            style: TextStyle(fontWeight: FontWeight.w700),
-          ),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            onSubmitted: (val) => Navigator.of(dialogContext).pop(val),
-            decoration: InputDecoration(
-              hintText: 'Nuevo nombre',
-              filled: true,
-              fillColor: const Color(0xFF121216),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text(
-                'Cancelar',
-                style: TextStyle(color: AppTheme.textSecondary),
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-              child: const Text(
-                'Guardar',
-                style: TextStyle(
-                  color: AppTheme.accent,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+    final newName = await PlaylistNameDialog.show(
+      context,
+      title: 'Renombrar Playlist',
+      hintText: 'Nuevo nombre',
+      confirmLabel: 'Guardar',
+      initialValue: currentName,
     );
-    controller.dispose();
 
     final trimmed = newName?.trim() ?? '';
     if (trimmed.isNotEmpty) {

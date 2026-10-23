@@ -38,58 +38,12 @@ class AddToPlaylistSheet extends StatefulWidget {
 
 class _AddToPlaylistSheetState extends State<AddToPlaylistSheet> {
   Future<void> _promptCreatePlaylist() async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1C1C22),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: const Text(
-            'Nueva Playlist',
-            style: TextStyle(fontWeight: FontWeight.w700),
-          ),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (val) => Navigator.of(dialogContext).pop(val),
-            decoration: InputDecoration(
-              hintText: 'Nombre de la playlist',
-              hintStyle: const TextStyle(color: Color(0x80FFFFFF)),
-              filled: true,
-              fillColor: const Color(0xFF121216),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text(
-                'Cancelar',
-                style: TextStyle(color: AppTheme.textSecondary),
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-              child: const Text(
-                'Crear',
-                style: TextStyle(
-                  color: AppTheme.accent,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+    final name = await PlaylistNameDialog.show(
+      context,
+      title: 'Nueva Playlist',
+      hintText: 'Nombre de la playlist',
+      confirmLabel: 'Crear',
     );
-    controller.dispose();
 
     final trimmed = name?.trim() ?? '';
     if (trimmed.isEmpty || !mounted) return;
@@ -320,6 +274,109 @@ class _PlaylistPlaceholderIcon extends StatelessWidget {
         Icons.queue_music_rounded,
         color: AppTheme.textSecondary,
       ),
+    );
+  }
+}
+
+/// Diálogo reutilizable que posee su propio [TextEditingController] y lo libera
+/// de forma segura en [State.dispose] tras finalizar la animación de cierre.
+class PlaylistNameDialog extends StatefulWidget {
+  const PlaylistNameDialog({
+    super.key,
+    required this.title,
+    required this.hintText,
+    required this.confirmLabel,
+    this.initialValue = '',
+  });
+
+  final String title;
+  final String hintText;
+  final String confirmLabel;
+  final String initialValue;
+
+  static Future<String?> show(
+    BuildContext context, {
+    required String title,
+    required String hintText,
+    required String confirmLabel,
+    String initialValue = '',
+  }) {
+    return showDialog<String>(
+      context: context,
+      builder: (_) => PlaylistNameDialog(
+        title: title,
+        hintText: hintText,
+        confirmLabel: confirmLabel,
+        initialValue: initialValue,
+      ),
+    );
+  }
+
+  @override
+  State<PlaylistNameDialog> createState() => _PlaylistNameDialogState();
+}
+
+class _PlaylistNameDialogState extends State<PlaylistNameDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1C1C22),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      title: Text(
+        widget.title,
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (val) => Navigator.of(context).pop(val),
+        decoration: InputDecoration(
+          hintText: widget.hintText,
+          hintStyle: const TextStyle(color: Color(0x80FFFFFF)),
+          filled: true,
+          fillColor: const Color(0xFF121216),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text(
+            'Cancelar',
+            style: TextStyle(color: AppTheme.textSecondary),
+          ),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: Text(
+            widget.confirmLabel,
+            style: const TextStyle(
+              color: AppTheme.accent,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
@@ -55,8 +56,22 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
   static const _restartThreshold = Duration(seconds: 3);
 
   final AudioPlayer player = AudioPlayer();
+  final math.Random _random = math.Random();
   SearchService? searchService;
   AudioRouterService? audioRouter;
+
+  /// Selecciona un índice aleatorio distinto de [currentIndex] cuando hay
+  /// al menos 2 pistas en la cola.
+  static int pickNextShuffleIndex(
+    int currentIndex,
+    int length, [
+    math.Random? random,
+  ]) {
+    if (length <= 1) return 0;
+    final rng = random ?? math.Random();
+    final raw = rng.nextInt(length - 1);
+    return raw >= currentIndex ? raw + 1 : raw;
+  }
 
   AudioRouterService? get _effectiveRouter {
     if (audioRouter != null) return audioRouter;
@@ -126,6 +141,15 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
     if (player.loopMode == LoopMode.one) {
       await player.seek(Duration.zero);
       await player.play();
+      return;
+    }
+    if (player.shuffleModeEnabled && _tracks.length > 1) {
+      final randomIndex = pickNextShuffleIndex(
+        _currentIndex,
+        _tracks.length,
+        _random,
+      );
+      await _playIndex(randomIndex, autoPlay: true);
       return;
     }
     if (_currentIndex + 1 < _tracks.length) {
@@ -266,6 +290,15 @@ class GhostAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler 
   @override
   Future<void> skipToNext() async {
     if (_tracks.isEmpty) return;
+    if (player.shuffleModeEnabled && _tracks.length > 1) {
+      final randomIndex = pickNextShuffleIndex(
+        _currentIndex,
+        _tracks.length,
+        _random,
+      );
+      await _playIndex(randomIndex, autoPlay: true);
+      return;
+    }
     if (_currentIndex + 1 < _tracks.length) {
       await _playIndex(_currentIndex + 1, autoPlay: true);
     } else if (player.loopMode == LoopMode.all) {
