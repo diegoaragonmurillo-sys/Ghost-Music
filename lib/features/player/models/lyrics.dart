@@ -8,12 +8,32 @@ class LyricLine {
 
 /// Letra de una canción, sincronizada (LRC) o en texto plano.
 class Lyrics {
-  const Lyrics({required this.lines, required this.isSynced});
+  const Lyrics({
+    required this.lines,
+    required this.isSynced,
+    this.suggestedOffsetMs = 0,
+  });
 
   final List<LyricLine> lines;
 
   /// `true` si cada línea tiene timestamp real (karaoke estilo Apple Music).
   final bool isSynced;
+
+  /// Offset sugerido en milisegundos detectado por discrepancia de duración
+  /// entre el audio de reproducción y la letra de estudio (ej. intro en video).
+  final int suggestedOffsetMs;
+
+  Lyrics copyWith({
+    List<LyricLine>? lines,
+    bool? isSynced,
+    int? suggestedOffsetMs,
+  }) {
+    return Lyrics(
+      lines: lines ?? this.lines,
+      isSynced: isSynced ?? this.isSynced,
+      suggestedOffsetMs: suggestedOffsetMs ?? this.suggestedOffsetMs,
+    );
+  }
 
   static final RegExp lrcLineRegex =
       RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)');
@@ -50,10 +70,20 @@ class Lyrics {
   }
 
   /// Crea una [Lyrics] a partir de LRC sincronizado o, en su defecto, texto.
-  static Lyrics? parse({String? synced, String? plain}) {
+  static Lyrics? parse({
+    String? synced,
+    String? plain,
+    int suggestedOffsetMs = 0,
+  }) {
     if (synced != null && synced.trim().isNotEmpty) {
       final lines = parseLrc(synced);
-      if (lines.isNotEmpty) return Lyrics(lines: lines, isSynced: true);
+      if (lines.isNotEmpty) {
+        return Lyrics(
+          lines: lines,
+          isSynced: true,
+          suggestedOffsetMs: suggestedOffsetMs,
+        );
+      }
     }
     if (plain != null && plain.trim().isNotEmpty) {
       final plainLines = plain
@@ -61,7 +91,11 @@ class Lyrics {
           .map((l) => LyricLine(Duration.zero, l.trim()))
           .toList();
       if (plainLines.isNotEmpty) {
-        return Lyrics(lines: plainLines, isSynced: false);
+        return Lyrics(
+          lines: plainLines,
+          isSynced: false,
+          suggestedOffsetMs: suggestedOffsetMs,
+        );
       }
     }
     return null;

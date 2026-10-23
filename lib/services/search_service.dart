@@ -48,12 +48,70 @@ class SearchService {
     final List<Video> videos;
     try {
       final results = await _yt.search.search(q, filter: TypeFilters.video);
-      videos = results
+      final rawCandidates = results
           .where((v) =>
               !v.isLive &&
               v.duration != null &&
               v.duration! >= _minDuration &&
               v.duration! <= _maxDuration)
+          .take(limit * 2)
+          .toList();
+
+      // Ponderación para priorizar versiones oficiales de audio sobre videoclips
+      // con intros cinemáticas o efectos hablados.
+      int scoreVideo(Video v) {
+        var score = 0;
+        final author = v.author.trim();
+        final title = v.title.toLowerCase();
+
+        // Máxima prioridad: canales de audio oficial autogenerados por YouTube Music
+        if (author.endsWith(' - Topic')) {
+          score += 4;
+        }
+
+        // Alta prioridad: pistas con etiqueta explícita de audio o lyrics
+        if (title.contains('official audio') ||
+            title.contains('(audio)') ||
+            title.contains('[audio]')) {
+          score += 3;
+        } else if (title.contains('audio')) {
+          score += 1;
+        }
+
+        if (title.contains('lyric video') || title.contains('lyrics')) {
+          score += 1;
+        }
+
+        // Penalizar videoclips con posibles intros actuadas o versiones extendidas
+        if (title.contains('official music video') ||
+            title.contains('official video') ||
+            title.contains('music video') ||
+            title.contains('videoclip') ||
+            title.contains('video oficial')) {
+          score -= 2;
+        }
+        if (title.contains('short film') ||
+            title.contains('extended version') ||
+            title.contains('extended video')) {
+          score -= 3;
+        }
+        return score;
+      }
+
+      // Ordenamiento estable que respeta la relevancia original en empates
+      final indexedCandidates =
+          rawCandidates.asMap().entries.toList();
+      indexedCandidates.sort((a, b) {
+        final scoreA = scoreVideo(a.value);
+        final scoreB = scoreVideo(b.value);
+        if (scoreB != scoreA) {
+          return scoreB.compareTo(scoreA);
+        }
+        return a.key.compareTo(b.key);
+      });
+
+      videos = indexedCandidates
+          .map((e) => e.value)
           .take(limit)
           .toList();
     } catch (e) {

@@ -2,22 +2,28 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../features/player/models/lyrics.dart';
 import '../features/player/models/track.dart';
 import 'download_service.dart';
 
-/// Servicio de letras sincronizadas mediante LRCLIB (`https://lrclib.net/api/search`)
-/// y Nivel 0 Local-First (archivos `.lrc` descargados).
+/// Servicio de letras sincronizadas mediante LRCLIB (`https://lrclib.net/api/search`),
+/// Nivel 0 Local-First (archivos `.lrc` descargados) y ajuste inteligente por duración.
 class LyricsService {
   LyricsService({
     http.Client? httpClient,
     this._downloadService,
+    this._prefs,
   })  : _http = httpClient ?? http.Client();
 
   final http.Client _http;
   final DownloadService? _downloadService;
+  SharedPreferences? _prefs;
   final Map<String, Lyrics?> _cache = {};
+
+  Future<SharedPreferences> get _effectivePrefs async =>
+      _prefs ??= await SharedPreferences.getInstance();
 
   DownloadService get _downloads =>
       _downloadService ?? DownloadService.instance;
@@ -27,6 +33,25 @@ class LyricsService {
     'User-Agent':
         'GhostMusic/1.0.0 (https://github.com/diegoaragonmurillo-sys/Ghost-Music)',
   };
+
+  /// Clave en [SharedPreferences] para el offset de sincronización por pista.
+  static String _offsetPrefKey(String trackId) => 'lyrics_offset_ms_$trackId';
+
+  /// Obtiene el offset manual guardado en milisegundos para una pista específica.
+  Future<int> getTrackOffsetMs(String trackId) async {
+    final prefs = await _effectivePrefs;
+    return prefs.getInt(_offsetPrefKey(trackId)) ?? 0;
+  }
+
+  /// Guarda el offset manual en milisegundos para una pista específica.
+  Future<void> setTrackOffsetMs(String trackId, int offsetMs) async {
+    final prefs = await _effectivePrefs;
+    if (offsetMs == 0) {
+      await prefs.remove(_offsetPrefKey(trackId));
+    } else {
+      await prefs.setInt(_offsetPrefKey(trackId), offsetMs);
+    }
+  }
 
   /// Expresión regular estricta para capturar minutos, segundos, milisegundos (2 o 3 dígitos) y texto.
   static final RegExp _lrcRegex = RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)');
@@ -92,19 +117,27 @@ class LyricsService {
     return serializeToLrc(lyrics);
   }
 
-  /// Obtiene y parsea las letras sincronizadas (LRC) para [trackName] y [artistName].
+  /// Obtiene y parsea las letras sincronizadas (LRC) para [trackName] y [artistName],
+  /// con soporte opcional para [targetDuration].
   Future<List<LyricLine>> fetchSyncedLyrics({
     required String trackName,
     required String artistName,
+    Duration? targetDuration,
   }) async {
     final cleanTrack = _cleanForLookup(trackName);
     final cleanArtist = _cleanArtist(artistName);
 
-    final lyrics = await _search({
-          'track_name': cleanTrack,
-          'artist_name': cleanArtist,
-        }) ??
-        await _search({'q': '$cleanTrack $cleanArtist'});
+    final lyrics = await _search(
+          {
+            'track_name': cleanTrack,
+            'artist_name': cleanArtist,
+          },
+          targetDuration: targetDuration,
+        ) ??
+        await _search(
+          {'q': '$cleanTrack $cleanArtist'},
+          targetDuration: targetDuration,
+        );
 
     if (lyrics == null) return const [];
     return lyrics.lines;
@@ -135,20 +168,29 @@ class LyricsService {
     final artist = _cleanArtist(track.artist);
     Lyrics? lyrics;
     try {
-      // 1. Petición GET a https://lrclib.net/api/search pasando track_name y artist_name.
-      lyrics = await _search({
-        'track_name': title,
-        'artist_name': artist,
-      });
+      // 1. Petición GET a https://lrclib.net/api/search pasando track_name, artist_name y targetDuration.
+      lyrics = await _search(
+        {
+          'track_name': title,
+          'artist_name': artist,
+        },
+        targetDuration: track.duration,
+      );
       // 2. Fallback por consulta general si los metadatos de YouTube varían.
-      lyrics ??= await _search({'q': '$title $artist'});
+      lyrics ??= await _search(
+        {'q': '$title $artist'},
+        targetDuration: track.duration,
+      );
     } catch (_) {
       lyrics = null;
     }
     return _cache[track.id] = lyrics;
   }
 
-  Future<Lyrics?> _search(Map<String, String> params) async {
+  Future<Lyrics?> _search(
+    Map<String, String> params, {
+    Duration? targetDuration,
+  }) async {
     final uri = Uri.https(_host, '/api/search', params);
     final res = await _http
         .get(uri, headers: _headers)
@@ -160,15 +202,63 @@ class LyricsService {
 
     final list = decoded.cast<Map<String, dynamic>>();
 
-    // Prioriza resultados que contengan el campo syncedLyrics en formato LRC.
+    // 1. Filtra primero los candidatos con syncedLyrics válido
+    final syncedCandidates = <Map<String, dynamic>>[];
     for (final item in list) {
       final synced = item['syncedLyrics'] as String?;
       if (synced != null && synced.trim().isNotEmpty) {
-        final parsedLines = parseLrc(synced);
-        if (parsedLines.isNotEmpty) {
-          return Lyrics(lines: parsedLines, isSynced: true);
+        final parsed = parseLrc(synced);
+        if (parsed.isNotEmpty) {
+          syncedCandidates.add(item);
         }
       }
+    }
+
+    if (syncedCandidates.isNotEmpty) {
+      Map<String, dynamic> chosenItem = syncedCandidates.first;
+
+      if (targetDuration != null) {
+        // Ordena según la menor diferencia absoluta de duración con respecto al audio
+        syncedCandidates.sort((a, b) {
+          final durA = (a['duration'] as num?)?.toDouble() ?? 0.0;
+          final durB = (b['duration'] as num?)?.toDouble() ?? 0.0;
+          final diffA = (durA - targetDuration.inSeconds).abs();
+          final diffB = (durB - targetDuration.inSeconds).abs();
+          return diffA.compareTo(diffB);
+        });
+
+        // Intentar preferir match cuya diferencia sea <= 4 segundos
+        chosenItem = syncedCandidates.firstWhere(
+          (item) {
+            final dur = (item['duration'] as num?)?.toDouble();
+            if (dur == null) return false;
+            return (dur - targetDuration.inSeconds).abs() <= 4.0;
+          },
+          orElse: () => syncedCandidates.first,
+        );
+      }
+
+      final parsedLines = parseLrc(chosenItem['syncedLyrics'] as String);
+      final lrcDurationSec = (chosenItem['duration'] as num?)?.toDouble();
+      var suggestedOffsetMs = 0;
+
+      // Compensación inteligente: si hay una diferencia notable de duración
+      // (ej. videoclip con intro hablada de 25s respecto a la versión de estudio)
+      if (targetDuration != null &&
+          lrcDurationSec != null &&
+          lrcDurationSec > 0) {
+        final deltaMs =
+            targetDuration.inMilliseconds - (lrcDurationSec * 1000).round();
+        if (deltaMs.abs() >= 3000 && deltaMs.abs() <= 60000) {
+          suggestedOffsetMs = deltaMs;
+        }
+      }
+
+      return Lyrics(
+        lines: parsedLines,
+        isSynced: true,
+        suggestedOffsetMs: suggestedOffsetMs,
+      );
     }
 
     // Fallback a letra plana si ninguna entrada tiene tiempos LRC.

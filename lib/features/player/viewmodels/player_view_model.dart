@@ -78,6 +78,7 @@ class PlayerViewModel extends ChangeNotifier {
   LoopMode get loopMode => _loopMode;
   ArtworkPalette get palette => _palette;
   Lyrics? get lyrics => _lyrics;
+  LyricsService get lyricsService => _lyricsService;
   bool get isLoadingLyrics => _isLoadingLyrics;
   String? get error => _error;
   LibraryService get libraryService => _libraryService;
