@@ -10,6 +10,7 @@ import '../widgets/album_artwork.dart';
 import '../widgets/blurred_background.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/playback_progress_bar.dart';
+import 'immersive_lyrics_view.dart';
 
 /// Pantalla "Now Playing" (Vista en MVVM). Solo renderiza estado del
 /// [PlayerViewModel] y le delega las acciones del usuario.
@@ -39,6 +40,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _vm.dispose();
     super.dispose();
+  }
+
+  void _openImmersiveLyrics() {
+    ImmersiveLyricsView.show(context, viewModel: _vm);
   }
 
   @override
@@ -125,14 +130,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ),
                           ),
                           IconButton(
-                            tooltip: 'Letras',
-                            onPressed: () =>
-                                setState(() => _showLyrics = !_showLyrics),
+                            tooltip: 'Letras inmersivas',
+                            onPressed: _openImmersiveLyrics,
                             icon: Icon(
                               Icons.lyrics_rounded,
-                              color: _showLyrics
-                                  ? _vm.palette.primary
-                                  : AppTheme.textSecondary,
+                              color: _vm.palette.primary,
                             ),
                           ),
                         ],
@@ -154,6 +156,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         onPrevious: _vm.previous,
                         onShuffle: _vm.toggleShuffle,
                         onRepeat: _vm.cycleLoopMode,
+                      ),
+                      const SizedBox(height: 12),
+                      TextButton.icon(
+                        onPressed: _openImmersiveLyrics,
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: Colors.white.withValues(alpha: 0.12),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 10,
+                          ),
+                          shape: const StadiumBorder(),
+                        ),
+                        icon: const Icon(Icons.lyrics_rounded, size: 18),
+                        label: const Text(
+                          'Letras sincronizadas',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
                       ),
                       if (_vm.error != null)
                         Padding(
