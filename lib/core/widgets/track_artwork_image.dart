@@ -88,9 +88,15 @@ class TrackArtworkImage extends StatelessWidget {
           width: width,
           height: height,
           color: const Color(0xFF1C1C22),
-          child: const Icon(
-            Icons.music_note_rounded,
-            color: Colors.white70,
+          child: Image.asset(
+            'assets/icon/app_icon.png',
+            width: width,
+            height: height,
+            fit: fit,
+            errorBuilder: (_, _, _) => const Icon(
+              Icons.music_note_rounded,
+              color: Colors.white70,
+            ),
           ),
         );
   }
