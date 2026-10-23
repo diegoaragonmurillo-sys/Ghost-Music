@@ -15,6 +15,18 @@ class Lyrics {
   /// `true` si cada línea tiene timestamp real (karaoke estilo Apple Music).
   final bool isSynced;
 
+  /// Lista hardcodeada con 5 líneas de prueba y sus tiempos para simular
+  /// una canción en la vista inmersiva de letras.
+  static const List<LyricLine> demoLines = [
+    LyricLine(Duration(seconds: 0), 'Luces de neón brillando en la ciudad'),
+    LyricLine(Duration(seconds: 4), 'El eco de tu voz vuelve a resonar'),
+    LyricLine(Duration(seconds: 8), 'Cada pulso marca el ritmo del corazón'),
+    LyricLine(Duration(seconds: 12), 'Flotando sin gravedad en esta canción'),
+    LyricLine(Duration(seconds: 16), 'Hasta que el silencio nos vuelva a encontrar'),
+  ];
+
+  static const Lyrics demo = Lyrics(lines: demoLines, isSynced: true);
+
   static final _timestamp = RegExp(r'\[(\d{1,2}):(\d{1,2}(?:[.:]\d{1,3})?)\]');
 
   /// Crea una [Lyrics] a partir de LRC sincronizado o, en su defecto, texto.
