@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../services/audio_player_service.dart';
 import '../viewmodels/player_view_model.dart';
 import '../widgets/album_artwork.dart';
 import '../widgets/blurred_background.dart';
@@ -10,7 +11,10 @@ import '../widgets/playback_progress_bar.dart';
 /// Pantalla "Now Playing" (Vista en MVVM). Solo renderiza estado del
 /// [PlayerViewModel] y le delega las acciones del usuario.
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({super.key, this.viewModel});
+  const PlayerScreen({super.key, required this.audioService, this.viewModel});
+
+  /// Servicio de audio compartido (conectado al Background Service).
+  final AudioPlayerService audioService;
 
   /// Inyectable para tests; si es null se crea uno por defecto.
   final PlayerViewModel? viewModel;
@@ -20,7 +24,8 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  late final PlayerViewModel _vm = widget.viewModel ?? PlayerViewModel();
+  late final PlayerViewModel _vm =
+      widget.viewModel ?? PlayerViewModel(audioService: widget.audioService);
 
   @override
   void initState() {

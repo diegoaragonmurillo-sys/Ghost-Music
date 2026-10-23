@@ -31,10 +31,10 @@ class ProgressState {
 ///   barra de progreso se reconstruya ~60 veces/seg, no toda la pantalla.
 class PlayerViewModel extends ChangeNotifier {
   PlayerViewModel({
-    AudioPlayerService? audioService,
+    required AudioPlayerService audioService,
     PaletteService? paletteService,
     this._queue = demoQueue,
-  })  : _audio = audioService ?? AudioPlayerService(),
+  })  : _audio = audioService,
         _palettes = paletteService ?? PaletteService();
 
   final AudioPlayerService _audio;
@@ -99,6 +99,13 @@ class PlayerViewModel extends ChangeNotifier {
 
   // ---- Ciclo de vida ----
   Future<void> init() async {
+    // Sincroniza con el estado actual del servicio (puede venir sonando
+    // desde background).
+    _currentIndex = _audio.currentIndex ?? 0;
+    _isPlaying = _audio.playing;
+    _shuffle = _audio.shuffleEnabled;
+    _loopMode = _audio.loopMode;
+
     _subs
       ..add(_audio.playerStateStream.listen((state) {
         final loading = state.processingState == ProcessingState.loading ||
@@ -152,19 +159,11 @@ class PlayerViewModel extends ChangeNotifier {
 
   void seek(Duration position) => _audio.seek(position);
 
-  void next() {
-    if (_audio.hasNext) _audio.seekToNext();
-  }
+  void next() => _audio.skipToNext();
 
-  /// Comportamiento Spotify/Apple: si han pasado >3 s, reinicia la pista;
-  /// si no, salta a la anterior.
-  void previous() {
-    if (_audio.position > const Duration(seconds: 3) || !_audio.hasPrevious) {
-      _audio.seek(Duration.zero);
-    } else {
-      _audio.seekToPrevious();
-    }
-  }
+  /// La lógica "reiniciar si >3 s" vive en el AudioHandler para que la
+  /// pantalla de bloqueo se comporte igual que la UI.
+  void previous() => _audio.skipToPrevious();
 
   void toggleShuffle() => _audio.setShuffle(!_shuffle);
 
@@ -178,7 +177,8 @@ class PlayerViewModel extends ChangeNotifier {
     for (final s in _subs) {
       s.cancel();
     }
-    _audio.dispose();
+    // El reproductor NO se libera aquí: pertenece al Background Service y
+    // debe seguir sonando aunque la vista se destruya.
     super.dispose();
   }
 }

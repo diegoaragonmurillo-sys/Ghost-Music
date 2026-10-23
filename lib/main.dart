@@ -3,8 +3,10 @@ import 'package:flutter/services.dart';
 
 import 'core/theme/app_theme.dart';
 import 'features/player/views/player_screen.dart';
+import 'services/audio_handler.dart';
+import 'services/audio_player_service.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Barra de estado clara sobre el fondo oscuro e inmersivo.
@@ -16,11 +18,17 @@ void main() {
     ),
   );
 
-  runApp(const GhostMusicApp());
+  // Background Service: la música sigue con la pantalla apagada y los
+  // controles aparecen en la pantalla de bloqueo / notificación.
+  final audioHandler = await initAudioService();
+
+  runApp(GhostMusicApp(audioService: AudioPlayerService(audioHandler)));
 }
 
 class GhostMusicApp extends StatelessWidget {
-  const GhostMusicApp({super.key});
+  const GhostMusicApp({super.key, required this.audioService});
+
+  final AudioPlayerService audioService;
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +38,7 @@ class GhostMusicApp extends StatelessWidget {
       themeMode: ThemeMode.dark,
       darkTheme: AppTheme.dark,
       theme: AppTheme.dark,
-      home: const PlayerScreen(),
+      home: PlayerScreen(audioService: audioService),
     );
   }
 }
