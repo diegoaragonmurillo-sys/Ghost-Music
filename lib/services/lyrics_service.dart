@@ -243,12 +243,13 @@ class LyricsService {
       var suggestedOffsetMs = 0;
 
       // Compensación inteligente: si hay una diferencia notable de duración
-      // (ej. videoclip con intro hablada de 25s respecto a la versión de estudio)
+      // (ej. videoclip con intro hablada de 26s respecto a la versión de estudio,
+      // deltaMs será negativo (-26000ms) para retrasar el disparo de las letras).
       if (targetDuration != null &&
           lrcDurationSec != null &&
           lrcDurationSec > 0) {
         final deltaMs =
-            targetDuration.inMilliseconds - (lrcDurationSec * 1000).round();
+            (lrcDurationSec * 1000).round() - targetDuration.inMilliseconds;
         if (deltaMs.abs() >= 3000 && deltaMs.abs() <= 60000) {
           suggestedOffsetMs = deltaMs;
         }

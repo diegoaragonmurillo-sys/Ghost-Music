@@ -64,6 +64,12 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
   /// Offset manual en milisegundos persistido por canción en SharedPreferences.
   int manualOffsetMs = 0;
 
+  /// Indica si el usuario tiene un offset manual guardado en SharedPreferences.
+  bool _hasSavedManualOffset = false;
+
+  /// Referencia a las últimas letras aplicadas para detectar carga asíncrona.
+  Lyrics? _lastAppliedLyrics;
+
   /// Panel de ajuste fino de sincronización visible/oculto.
   bool _showSyncPanel = false;
 
@@ -140,14 +146,17 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
     final saved = await _vm.lyricsService.getTrackOffsetMs(trackId);
     if (!mounted || _currentTrackId != trackId) return;
     setState(() {
+      _hasSavedManualOffset = saved != 0;
       manualOffsetMs = saved != 0
           ? saved
           : (_vm.lyrics?.suggestedOffsetMs ?? 0);
+      _lastAppliedLyrics = _vm.lyrics;
     });
   }
 
   Future<void> _updateOffset(int newOffsetMs) async {
     setState(() {
+      _hasSavedManualOffset = newOffsetMs != 0;
       manualOffsetMs = newOffsetMs;
     });
     await _vm.lyricsService.setTrackOffsetMs(_vm.currentTrack.id, newOffsetMs);
@@ -159,9 +168,16 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
     if (_currentTrackId != trackId) {
       _currentTrackId = trackId;
       _currentIndex = -1;
+      _hasSavedManualOffset = false;
+      _lastAppliedLyrics = null;
       _anchorPosition = _vm.currentPosition;
       _interpolatedWatch.reset();
       _loadPersistedOffset(trackId);
+    } else if (_vm.lyrics != null && _vm.lyrics != _lastAppliedLyrics) {
+      _lastAppliedLyrics = _vm.lyrics;
+      if (!_hasSavedManualOffset && manualOffsetMs == 0) {
+        manualOffsetMs = _vm.lyrics!.suggestedOffsetMs;
+      }
     }
 
     if (_vm.isPlaying) {
@@ -256,15 +272,21 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
     final lyrics = _vm.lyrics;
     if (lyrics == null || lyrics.lines.isEmpty) return;
 
-    final targetIndex = _currentIndex < 0 ? 0 : _currentIndex;
+    final firstVocalIndex =
+        lyrics.lines.indexWhere((l) => l.text.trim().isNotEmpty);
+    final targetIndex = firstVocalIndex >= 0 ? firstVocalIndex : 0;
     final targetTime = lyrics.lines[targetIndex].time;
     final effectivePosition = _getEffectivePosition();
 
-    // Calcula el offset exacto al milisegundo para alinear la voz que se oye
+    // Calcula el offset exacto al milisegundo para alinear la primera línea cantada
     final newOffsetMs =
         targetTime.inMilliseconds - effectivePosition.inMilliseconds;
 
     _updateOffset(newOffsetMs);
+    setState(() {
+      _currentIndex = targetIndex;
+    });
+    _scrollToActiveIndex(targetIndex);
 
     final targetLabel = lyrics.lines[targetIndex].text.isNotEmpty
         ? '"${lyrics.lines[targetIndex].text}"'
@@ -458,11 +480,30 @@ class _ImmersiveLyricsViewState extends State<ImmersiveLyricsView> {
                   isPassed: isPassed,
                   onTap: lyrics.isSynced
                       ? () {
-                          setState(() {
-                            _currentIndex = index;
-                          });
-                          _vm.seek(line.time);
-                          _scrollToActiveIndex(index);
+                          if (_showSyncPanel) {
+                            final newOffsetMs = line.time.inMilliseconds -
+                                _getEffectivePosition().inMilliseconds;
+                            _updateOffset(newOffsetMs);
+                            setState(() {
+                              _currentIndex = index;
+                            });
+                            _scrollToActiveIndex(index);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Sincronizado a esta línea (${newOffsetMs >= 0 ? '+' : ''}${(newOffsetMs / 1000).toStringAsFixed(1)}s)',
+                                ),
+                                duration: const Duration(seconds: 2),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          } else {
+                            setState(() {
+                              _currentIndex = index;
+                            });
+                            _vm.seek(line.time);
+                            _scrollToActiveIndex(index);
+                          }
                         }
                       : null,
                 );

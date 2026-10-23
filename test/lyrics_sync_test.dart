@@ -171,7 +171,16 @@ void main() {
         final lyrics = await service.fetch(videoTrack);
 
         expect(lyrics, isNotNull);
-        expect(lyrics!.suggestedOffsetMs, 26000); // 380s - 354s = 26s = 26000ms
+        // 354s (LRC) - 380s (Video) = -26s = -26000ms (retrasa las letras 26s)
+        expect(lyrics!.suggestedOffsetMs, -26000);
+
+        // Cuando el video va por el segundo 46 (26s intro + 20s canción),
+        // al sumar suggestedOffsetMs (-26s) da exactamente 20s, activando [00:20.00].
+        const effectivePosition = Duration(seconds: 46);
+        final adjustedPosition = effectivePosition +
+            Duration(milliseconds: lyrics.suggestedOffsetMs);
+        expect(adjustedPosition, const Duration(seconds: 20));
+        expect(lyrics.indexAt(adjustedPosition), 0);
       },
     );
   });
